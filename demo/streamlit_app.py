@@ -14,7 +14,13 @@ from datetime import datetime
 
 # Import our modules
 import sys
-sys.path.append('..')
+from pathlib import Path
+
+# Ensure project root is on sys.path so that 'models', 'algos', and 'data' can be imported
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from models.unet import create_model
 from algos.admm_pnp import ADMMPnP, TVDenoiser
 from algos.evaluation import calculate_metrics
