@@ -1,0 +1,14 @@
+.venv/
+env/
+*.pyc
+__pycache__/
+
+# Large model checkpoints (use Git LFS or releases instead)
+*.pth
+*.pt
+
+# IDE / OS files
+.DS_Store
+.idea/
+.vscode/
+
