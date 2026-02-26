@@ -3,7 +3,8 @@ torchvision>=0.13.0
 numpy>=1.21.0
 scipy>=1.8.0
 scikit-image>=0.19.0
-opencv-python>=4.6.0
+# Use headless OpenCV to avoid libGL issues on servers/Streamlit Cloud
+opencv-python-headless>=4.6.0
 matplotlib>=3.5.0
 streamlit>=1.20.0
 tqdm>=4.64.0
