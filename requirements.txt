@@ -1,18 +1,20 @@
-# PyTorch: install from PyPI only here so Streamlit Cloud’s uv resolver does not mix indexes
-# (extra-index-url + uv breaks builds of onnx/ml-dtypes/setuptools). CI/Docker install CPU
-# wheels explicitly where needed; see .github/workflows/ci.yml and Dockerfile.
+# Streamlit Community Cloud: in Manage app → Advanced settings, prefer Python 3.11 for
+# parity with CI and smaller CPU stacks. Python 3.13 is supported via the ranges below.
+#
+# No --extra-index-url here: `uv pip install` on Community Cloud breaks when the PyTorch
+# index is listed first (setuptools / transitive build deps). Torch wheels are on PyPI.
+streamlit>=1.28.0
+numpy>=1.26.4,<2.2.0
+scipy>=1.11.0,<1.16.0
+matplotlib>=3.7.0,<3.11
+Pillow>=9.0.0,<13
+opencv-python-headless>=4.8.0,<4.13
+torch>=2.2.2,<2.8.0
+torchvision>=0.17.2,<0.27.0
 PyYAML>=6.0
-torch>=1.12.0
-torchvision>=0.13.0
-numpy>=1.21.0,<2.0
-scipy>=1.8.0,<1.14
-scikit-image>=0.19.0
-opencv-python-headless>=4.6.0,<4.13
-matplotlib>=3.5.0,<3.10
-streamlit>=1.20.0
+scikit-image>=0.21.0,<0.26.0
 tqdm>=4.64.0
-Pillow>=9.0.0,<12
-packaging>=20.0,<25
-pandas>=1.4.0
-seaborn>=0.11.0
-plotly>=5.0.0
+packaging>=20.0,<26
+pandas>=1.5.0
+seaborn>=0.12.0
+plotly>=5.14.0

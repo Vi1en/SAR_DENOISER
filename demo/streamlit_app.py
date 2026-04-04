@@ -2,7 +2,6 @@
 Streamlit demo application for ADMM-PnP-DL SAR image denoising
 """
 import streamlit as st
-import torch
 import numpy as np
 import matplotlib.pyplot as plt
 import cv2
@@ -44,6 +43,16 @@ def _ensure_pyyaml() -> None:
 
 
 _ensure_pyyaml()
+
+
+def _cuda_available() -> bool:
+    try:
+        import torch
+
+        return bool(torch.cuda.is_available())
+    except Exception:
+        return False
+
 
 from algos.evaluation import calculate_metrics, calculate_ssim
 from api import storage as job_storage
@@ -303,8 +312,8 @@ psf_sigma = st.sidebar.slider("PSF Sigma", 0.5, 3.0, 1.0, help="Point spread fun
 # Method selection
 method = st.sidebar.selectbox(
     "Denoising Method",
-    ["ADMM-PnP-DL", "Direct Denoising", "TV Denoising"],
-    help="Choose the denoising approach",
+    ["TV Denoising", "Direct Denoising", "ADMM-PnP-DL"],
+    help="Choose the denoising approach (TV is lightweight and needs no checkpoint)",
 )
 
 direct_show_uncertainty = False
@@ -393,7 +402,7 @@ with col1:
                 st.error("Upload at least one image in the batch uploader above.")
             else:
                 with st.spinner(f"Denoising {len(todo)} image(s)…"):
-                    device_str = "cuda" if torch.cuda.is_available() else "cpu"
+                    device_str = "cuda" if _cuda_available() else "cpu"
                     opts = service_options_from_merged()
                     svc = SARDenoiseService(
                         device=device_str,
@@ -501,8 +510,9 @@ with col1:
                     import rasterio
                 except ImportError:
                     st.error(
-                        "**rasterio** is not installed. Install project requirements "
-                        "(e.g. `pip install rasterio`)."
+                        "**rasterio** is not installed on this host. For GeoTIFF, use "
+                        "`pip install -r requirements-full.txt` locally; Streamlit Cloud "
+                        "uses the slim `requirements.txt` (PNG upload workflow works)."
                     )
                 else:
                     gt_raw = geotiff_file.getvalue()
@@ -521,7 +531,7 @@ with col1:
                                 imp_ck = ckpt if method == "ADMM-PnP-DL" else None
                                 sim_ck = ckpt if method == "Direct Denoising" else None
 
-                                device_str = "cuda" if torch.cuda.is_available() else "cpu"
+                                device_str = "cuda" if _cuda_available() else "cpu"
                                 opts = service_options_from_merged()
                                 gt_svc = SARDenoiseService(
                                     device=device_str,
@@ -960,7 +970,7 @@ with col1:
                                 f"Batch denoising {len(imgs)} patch(es) with **{method}**…"
                             ):
                                 device_str = (
-                                    "cuda" if torch.cuda.is_available() else "cpu"
+                                    "cuda" if _cuda_available() else "cpu"
                                 )
                                 opts = service_options_from_merged()
                                 batch_svc = SARDenoiseService(
@@ -1073,7 +1083,7 @@ with col2:
                 if np.iscomplexobj(noisy_image):
                     st.info("📡 Detected complex SAR data - extracting magnitude")
 
-                device_str = "cuda" if torch.cuda.is_available() else "cpu"
+                device_str = "cuda" if _cuda_available() else "cpu"
                 opts = service_options_from_merged()
                 svc = SARDenoiseService(
                     device=device_str,
@@ -1126,7 +1136,7 @@ with col2:
                 if np.iscomplexobj(noisy_image):
                     st.info("📡 Detected complex SAR data - extracting magnitude")
 
-                device_str = "cuda" if torch.cuda.is_available() else "cpu"
+                device_str = "cuda" if _cuda_available() else "cpu"
                 opts = service_options_from_merged()
                 svc = SARDenoiseService(
                     device=device_str,

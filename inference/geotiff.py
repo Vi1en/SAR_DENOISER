@@ -97,8 +97,14 @@ def denoise_geotiff(
         Must be ``0`` in this version (non-overlapping tiles). Positive overlap
         would require blending to avoid seams.
     """
-    import rasterio
-    from rasterio.windows import Window
+    try:
+        import rasterio
+        from rasterio.windows import Window
+    except ImportError as e:  # pragma: no cover - optional extra (requirements-full.txt)
+        raise ImportError(
+            "GeoTIFF support requires rasterio. Install locally with "
+            "`pip install rasterio` or `pip install -r requirements-full.txt`."
+        ) from e
 
     if overlap != 0:
         raise ValueError(
@@ -174,8 +180,14 @@ def denoise_geotiff_two_band(
     Two-band float32 GeoTIFF: band 1 = denoised (physical units), band 2 = TTA uncertainty
     scaled by the tile dynamic range ``(tmax - tmin)`` (same per-tile normalization as band 1).
     """
-    import rasterio
-    from rasterio.windows import Window
+    try:
+        import rasterio
+        from rasterio.windows import Window
+    except ImportError as e:  # pragma: no cover
+        raise ImportError(
+            "GeoTIFF support requires rasterio. Install locally with "
+            "`pip install rasterio` or `pip install -r requirements-full.txt`."
+        ) from e
 
     if overlap != 0:
         raise ValueError("denoise_geotiff_two_band requires overlap=0 (same as denoise_geotiff).")
