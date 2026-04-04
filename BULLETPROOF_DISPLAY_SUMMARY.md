@@ -124,7 +124,7 @@ if final_std > 0.01:  # Only apply gamma if there's sufficient variance
 
 ## 🚀 **Integration in Streamlit App**
 
-### **Updated Main App** (`demo/app.py`):
+### **Updated Main App** (`demo/streamlit_app.py`):
 ```python
 # Use bulletproof display function for complete self-correction
 from demo.bulletproof_display import display_denoised_image
@@ -164,7 +164,7 @@ else:
 ### **File Structure**
 ```
 demo/
-├── app.py                    # Main Streamlit app (updated)
+├── streamlit_app.py          # Main Streamlit app (updated)
 ├── bulletproof_display.py    # Bulletproof display function
 └── test_bulletproof_display.py  # Test script
 ```

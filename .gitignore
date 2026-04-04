@@ -1,14 +1,53 @@
 .venv/
 env/
+venv/
 *.pyc
 __pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+.coverage
+htmlcov/
+coverage.xml
 
-# Large model checkpoints (use Git LFS or releases instead)
+# Secrets and local env
+.env
+.env.*
+!.env.example
+
+# Large model checkpoints (use Releases, Git LFS, or Streamlit Secrets URL)
 *.pth
 *.pt
+models_artifacts/*.onnx
+models_artifacts/*.onnx.data
 
-# IDE / OS files
+# Async job workspace (regenerable)
+data/jobs/
+
+# Large / optional datasets (keep tracked: data/sample_sar for bundled demo)
+data/synthetic_sar/
+data/ood_paired/
+test_sample_data/
+
+# Regenerable evaluation outputs (policy: see results/baseline/README.md)
+results/baseline/staging/
+results/runs/
+results_sample/
+
+# IDE / OS
 .DS_Store
 .idea/
 .vscode/
+Thumbs.db
 
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# Logs / temp
+*.log
+tmp/
+temp/

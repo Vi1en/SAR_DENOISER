@@ -66,6 +66,45 @@ def calculate_metrics(clean, denoised):
     }
 
 
+def results_to_jsonable(results: dict, include_per_patch_lists: bool = True) -> dict:
+    """
+    Convert evaluator ``results`` (numpy scalars, lists, inf) to JSON-safe Python types.
+    If ``include_per_patch_lists`` is False, drops ``*_values`` keys to keep files small.
+    """
+    import math
+
+    def convert(x):
+        if isinstance(x, (np.floating, float)):
+            v = float(x)
+            if math.isnan(v) or math.isinf(v):
+                return None
+            return v
+        if isinstance(x, (np.integer, int)):
+            return int(x)
+        if isinstance(x, np.ndarray):
+            return [convert(i) for i in x.tolist()]
+        if isinstance(x, dict):
+            return {k: convert(v) for k, v in x.items()}
+        if isinstance(x, (list, tuple)):
+            return [convert(i) for i in x]
+        return x
+
+    out = convert(results)
+    if not include_per_patch_lists and isinstance(out, dict):
+        trimmed = {}
+        for method, payload in out.items():
+            if not isinstance(payload, dict):
+                trimmed[method] = payload
+                continue
+            trimmed[method] = {
+                k: v
+                for k, v in payload.items()
+                if not k.endswith("_values")
+            }
+        return trimmed
+    return out
+
+
 class SARDenoisingEvaluator:
     """Comprehensive evaluator for SAR denoising methods"""
     
@@ -73,15 +112,35 @@ class SARDenoisingEvaluator:
         self.device = device
         self.results = {}
     
-    def evaluate_method(self, method_name, denoiser, test_loader, admm_params=None):
-        """Evaluate a denoising method on test dataset"""
+    def evaluate_method(
+        self,
+        method_name,
+        denoiser,
+        test_loader,
+        admm_params=None,
+        *,
+        include_task_metrics: bool = True,
+    ):
+        """Evaluate a denoising method on test dataset.
+
+        When ``include_task_metrics`` is True, also computes structure/edge proxies
+        from ``evaluators.task_metrics`` (gradient correlation, EPI, Laplacian MSE, grad SSIM).
+        """
         print(f"Evaluating {method_name}...")
         
         psnr_values = []
         ssim_values = []
         enl_values = []
-        
-        denoiser.eval()
+        gsm_corr_values = []
+        epi_values = []
+        laplacian_mse_values = []
+        grad_ssim_values = []
+
+        if hasattr(denoiser, 'eval'):
+            denoiser.eval()
+
+        if include_task_metrics:
+            from evaluators.task_metrics import compute_task_metrics
         
         with torch.no_grad():
             for batch in tqdm(test_loader, desc=f"Evaluating {method_name}"):
@@ -96,6 +155,9 @@ class SARDenoisingEvaluator:
                     admm = ADMMPnP(denoiser, device=self.device, **(admm_params or {}))
                     result = admm.denoise(noisy.squeeze().cpu().numpy(), noise_level=noise_level.item())
                     denoised = torch.from_numpy(result['denoised']).float()
+                elif method_name == 'TV Denoising':
+                    with torch.enable_grad():
+                        denoised = denoiser.tv_denoise(noisy)
                 else:
                     # Direct denoising
                     if hasattr(denoiser, 'noise_conditioning') and denoiser.noise_conditioning:
@@ -111,9 +173,16 @@ class SARDenoisingEvaluator:
                 psnr_values.append(metrics['psnr'])
                 ssim_values.append(metrics['ssim'])
                 enl_values.append(metrics['enl'])
+
+                if include_task_metrics:
+                    tm = compute_task_metrics(clean_np, denoised_np, noisy=noisy.squeeze().cpu().numpy())
+                    gsm_corr_values.append(tm["gsm_corr"])
+                    epi_values.append(tm["epi"])
+                    laplacian_mse_values.append(tm["laplacian_mse"])
+                    grad_ssim_values.append(tm["grad_ssim"])
         
         # Calculate statistics
-        self.results[method_name] = {
+        row = {
             'psnr_mean': np.mean(psnr_values),
             'psnr_std': np.std(psnr_values),
             'ssim_mean': np.mean(ssim_values),
@@ -124,11 +193,32 @@ class SARDenoisingEvaluator:
             'ssim_values': ssim_values,
             'enl_values': enl_values
         }
+        if include_task_metrics:
+            row.update({
+                'gsm_corr_mean': np.mean(gsm_corr_values),
+                'gsm_corr_std': np.std(gsm_corr_values),
+                'epi_mean': np.mean(epi_values),
+                'epi_std': np.std(epi_values),
+                'laplacian_mse_mean': np.mean(laplacian_mse_values),
+                'laplacian_mse_std': np.std(laplacian_mse_values),
+                'grad_ssim_mean': np.mean(grad_ssim_values),
+                'grad_ssim_std': np.std(grad_ssim_values),
+                'gsm_corr_values': gsm_corr_values,
+                'epi_values': epi_values,
+                'laplacian_mse_values': laplacian_mse_values,
+                'grad_ssim_values': grad_ssim_values,
+            })
+        self.results[method_name] = row
         
         print(f"{method_name} Results:")
         print(f"  PSNR: {np.mean(psnr_values):.2f} ± {np.std(psnr_values):.2f}")
         print(f"  SSIM: {np.mean(ssim_values):.4f} ± {np.std(ssim_values):.4f}")
         print(f"  ENL: {np.mean(enl_values):.2f} ± {np.std(enl_values):.2f}")
+        if include_task_metrics:
+            print(f"  GSM corr: {row['gsm_corr_mean']:.4f} ± {row['gsm_corr_std']:.4f}")
+            print(f"  EPI: {row['epi_mean']:.4f} ± {row['epi_std']:.4f}")
+            print(f"  Laplacian MSE: {row['laplacian_mse_mean']:.6f} ± {row['laplacian_mse_std']:.6f}")
+            print(f"  Grad SSIM: {row['grad_ssim_mean']:.4f} ± {row['grad_ssim_std']:.4f}")
     
     def compare_methods(self, methods_results):
         """Compare multiple denoising methods"""
@@ -138,8 +228,7 @@ class SARDenoisingEvaluator:
         
         # Create comparison table
         methods = list(methods_results.keys())
-        metrics = ['psnr_mean', 'ssim_mean', 'enl_mean']
-        
+
         print(f"{'Method':<20} {'PSNR':<10} {'SSIM':<10} {'ENL':<10}")
         print("-" * 60)
         
@@ -149,6 +238,16 @@ class SARDenoisingEvaluator:
             ssim = f"{result['ssim_mean']:.4f}±{result['ssim_std']:.4f}"
             enl = f"{result['enl_mean']:.2f}±{result['enl_std']:.2f}"
             print(f"{method:<20} {psnr:<10} {ssim:<10} {enl:<10}")
+        if methods and 'gsm_corr_mean' in methods_results[methods[0]]:
+            print("-" * 60)
+            print(f"{'Method':<20} {'GSM-corr':<12} {'EPI':<12} {'Grad-SSIM':<12}")
+            print("-" * 60)
+            for method in methods:
+                r = methods_results[method]
+                g = f"{r['gsm_corr_mean']:.4f}±{r['gsm_corr_std']:.4f}"
+                e = f"{r['epi_mean']:.4f}±{r['epi_std']:.4f}"
+                gs = f"{r['grad_ssim_mean']:.4f}±{r['grad_ssim_std']:.4f}"
+                print(f"{method:<20} {g:<12} {e:<12} {gs:<12}")
     
     def plot_comparison(self, save_dir='results'):
         """Plot comparison results"""
@@ -207,6 +306,31 @@ class SARDenoisingEvaluator:
         plt.tight_layout()
         plt.savefig(os.path.join(save_dir, 'metric_distributions.png'), dpi=300, bbox_inches='tight')
         plt.close()
+
+        # Task / structure metrics (optional second figure)
+        if methods and 'gsm_corr_mean' in self.results[methods[0]]:
+            task_keys = [
+                ('gsm_corr', 'GSM correlation'),
+                ('epi', 'Edge preservation index'),
+                ('grad_ssim', 'Grad SSIM'),
+            ]
+            fig, axes = plt.subplots(1, len(task_keys), figsize=(5 * len(task_keys), 5))
+            if len(task_keys) == 1:
+                axes = [axes]
+            for ax, (key, label) in zip(axes, task_keys):
+                means = [self.results[m][f'{key}_mean'] for m in methods]
+                stds = [self.results[m][f'{key}_std'] for m in methods]
+                x_pos = np.arange(len(methods))
+                ax.bar(x_pos, means, yerr=stds, capsize=5, alpha=0.7)
+                ax.set_xlabel('Method')
+                ax.set_ylabel(label)
+                ax.set_title(label)
+                ax.set_xticks(x_pos)
+                ax.set_xticklabels(methods, rotation=45, ha='right')
+                ax.grid(True, alpha=0.3)
+            plt.tight_layout()
+            plt.savefig(os.path.join(save_dir, 'task_metric_comparison.png'), dpi=300, bbox_inches='tight')
+            plt.close()
     
     def save_results(self, save_dir='results'):
         """Save evaluation results to file"""

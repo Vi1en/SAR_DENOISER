@@ -1,0 +1,14 @@
+# HTTP / batch inference defaults when SAR_* environment variables are omitted.
+# Environment overrides: SAR_DEVICE, SAR_CHECKPOINT, SAR_MODEL_TYPE, SAR_BACKEND,
+# SAR_ONNX_PATH, SAR_INFER_CONFIG.
+
+device: auto
+# Backbone slug for OpenAPI default and ADMM/Direct: unet | dncnn | res_unet
+model_type: unet
+# Direct denoising only (ADMM stays PyTorch). Overridden by SAR_BACKEND.
+backend: pytorch
+
+# Optional single checkpoint (same semantics as SAR_CHECKPOINT for both improved/simple paths).
+# checkpoint: checkpoints_improved/best_model.pth
+# When backend is onnx, set path to exported model (overridden by SAR_ONNX_PATH):
+# onnx_path: models_artifacts/denoiser.onnx

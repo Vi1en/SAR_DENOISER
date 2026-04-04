@@ -1,0 +1,4 @@
+# Development / CI (install after requirements.txt; use CPU PyTorch in CI via workflow).
+-r requirements.txt
+ruff>=0.8.0
+pytest>=8.0.0

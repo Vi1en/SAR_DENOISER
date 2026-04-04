@@ -213,7 +213,9 @@ def visualize_sample_dataset(data_dir, num_samples=4):
         axes[1, i].axis('off')
     
     plt.tight_layout()
-    plt.savefig('sample_dataset_visualization.png', dpi=150, bbox_inches='tight')
+    _assets = Path(__file__).resolve().parents[1] / "assets" / "images"
+    _assets.mkdir(parents=True, exist_ok=True)
+    plt.savefig(_assets / "sample_dataset_visualization.png", dpi=150, bbox_inches="tight")
     plt.close()
     
     print("✅ SAMPLE dataset visualization saved!")

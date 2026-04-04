@@ -1,0 +1,15 @@
+# Residual U-Net (Upgrade 4) — same hyperparameters as default improved run for fair ablation.
+# Train: python train_improved.py --config configs/train/res_unet_default.yaml
+
+seed: 42
+device: auto
+data_dir: data/sample_sar/processed
+patch_size: 128
+batch_size: 8
+num_workers: 2
+epochs: 20
+lr: 0.0002
+model_type: res_unet
+noise_conditioning: false
+checkpoint_dir: checkpoints_res_unet
+results_png: res_unet_training_results.png

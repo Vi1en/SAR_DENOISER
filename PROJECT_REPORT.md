@@ -416,7 +416,7 @@ To illustrate the behaviour of the web application and the underlying models, se
 
 The application can be deployed:
 
-1. **Local**: Run on local machine with `streamlit run demo/app.py`
+1. **Local**: Run on local machine with `streamlit run demo/streamlit_app.py`
 2. **Cloud**: Deploy to Streamlit Cloud, Heroku, or AWS
 3. **Docker**: Containerized deployment for easy distribution
 4. **Standalone**: Package as executable with PyInstaller
@@ -772,7 +772,7 @@ admm-pnp-dl/
 │   ├── train_denoiser.py         # Denoiser training
 │   └── train_unrolled.py         # Unrolled ADMM training
 ├── demo/
-│   └── app.py                    # Streamlit web application
+│   └── streamlit_app.py          # Streamlit web application
 └── requirements.txt              # Dependencies
 ```
 

@@ -104,7 +104,7 @@ FINAL_YEAR_PROJECT/
 │   ├── final_model.pth           # Final epoch model
 │   └── training_curves.png       # Training visualization
 ├── checkpoints_simple/           # Original model (fallback)
-├── demo/app.py                   # Updated Streamlit demo
+├── demo/streamlit_app.py         # Updated Streamlit demo
 ├── train_improved.py             # 🚀 NEW: Enhanced training
 ├── improved_training_results.png # 🚀 NEW: Results visualization
 └── IMPROVEMENTS_SUMMARY.md       # This file

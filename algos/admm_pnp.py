@@ -385,20 +385,24 @@ class TVDenoiser:
             loss = data_loss + self.lambda_tv * tv_loss
             loss.backward()
             optimizer.step()
-            
-            # Clamp to valid range
+
+            # In-place clamp keeps `x` a leaf with requires_grad for the optimizer
             with torch.no_grad():
-                x = torch.clamp(x, 0, 1)
-        
+                x.clamp_(0, 1)
+
         return x.detach()
     
     def compute_tv_loss(self, x):
-        """Compute total variation loss"""
-        # Compute gradients
-        grad_x = torch.diff(x, dim=1, prepend=x[:, :, :1])
-        grad_y = torch.diff(x, dim=0, prepend=x[:1, :, :])
-        
-        # TV norm
+        """Compute total variation loss (2D [H,W] or 4D [B,C,H,W])."""
+        if x.dim() == 2:
+            grad_y = torch.diff(x, dim=0, prepend=x[:1, :])
+            grad_x = torch.diff(x, dim=1, prepend=x[:, :1])
+        elif x.dim() == 4:
+            grad_y = torch.diff(x, dim=2, prepend=x[:, :, :1, :])
+            grad_x = torch.diff(x, dim=3, prepend=x[:, :, :, :1])
+        else:
+            raise ValueError(f"tv_denoise expected 2D or 4D tensor, got shape {tuple(x.shape)}")
+
         tv = torch.sqrt(grad_x**2 + grad_y**2 + 1e-8).sum()
         return tv
 

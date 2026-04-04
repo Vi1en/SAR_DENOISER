@@ -1,0 +1,13 @@
+# Minimal run for CI / smoke tests (single epoch, small batch).
+
+device: auto
+data_dir: data/sample_sar/processed
+patch_size: 128
+batch_size: 2
+num_workers: 0
+epochs: 1
+lr: 0.0002
+model_type: unet
+noise_conditioning: false
+checkpoint_dir: checkpoints_improved
+results_png: improved_training_results.png

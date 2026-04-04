@@ -1,0 +1,7 @@
+# Apt packages for Streamlit Community Cloud (helps OpenCV headless + optional GeoTIFF).
+# https://docs.streamlit.io/streamlit-community-cloud/deploy-your-app/app-dependencies
+libgl1
+libglib2.0-0
+libsm6
+libxext6
+libxrender1

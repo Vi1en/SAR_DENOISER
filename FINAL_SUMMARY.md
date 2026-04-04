@@ -136,7 +136,7 @@ python download_sample_dataset.py
 python train_simple.py
 
 # 4. Launch demo
-streamlit run demo/app.py
+streamlit run demo/streamlit_app.py
 ```
 
 ### **Advanced Usage**

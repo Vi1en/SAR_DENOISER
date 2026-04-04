@@ -3,9 +3,24 @@
 
 ---
 
+## 📁 Where are the PowerPoint files?
+
+**All `.pptx` decks are in the [`presentations/`](presentations/) folder.**
+
+| File | Role |
+|------|------|
+| [`presentations/ADMM_PnP_SAR_Denoising_Presentation.pptx`](presentations/ADMM_PnP_SAR_Denoising_Presentation.pptx) | Main technical deck (summary below) |
+| [`presentations/project_improvements_presentation.pptx`](presentations/project_improvements_presentation.pptx) | Changelog-driven evolution / proof deck — run `python scripts/build_improvements_presentation.py` to regenerate |
+| [`presentations/SAR_Denoising_Project_Evolution.pptx`](presentations/SAR_Denoising_Project_Evolution.pptx) | Evolution variant |
+| [`presentations/Untitled presentation.pptx`](presentations/Untitled%20presentation.pptx) | Draft / scratch |
+
+See also **[`presentations/README.md`](presentations/README.md)**.
+
+---
+
 ## 📊 **Presentation Overview**
 
-**File Created:** `ADMM_PnP_SAR_Denoising_Presentation.pptx`
+**File Created:** `presentations/ADMM_PnP_SAR_Denoising_Presentation.pptx`
 **Total Slides:** 15
 **Format:** Professional PowerPoint presentation
 **Target Audience:** Technical audience, researchers, stakeholders
@@ -159,7 +174,7 @@
 
 ## 📁 **Files Created**
 
-1. **`ADMM_PnP_SAR_Denoising_Presentation.pptx`** - Main PowerPoint presentation
+1. **`presentations/ADMM_PnP_SAR_Denoising_Presentation.pptx`** - Main PowerPoint presentation
 2. **`ADMM_PnP_SAR_Denoising_Presentation.md`** - Detailed slide content
 3. **`create_presentation.py`** - Python script for presentation generation
 4. **`PROJECT_PRESENTATION_SUMMARY.md`** - This summary document

@@ -125,7 +125,7 @@ def main():
     print("1. Test the setup: python test_setup.py")
     print("2. Train models: python train.py")
     print("3. Evaluate models: python evaluate.py")
-    print("4. Launch demo: streamlit run demo/app.py")
+    print("4. Launch demo: streamlit run demo/streamlit_app.py")
     print("\nFor detailed usage, see README.md")
     
     return True

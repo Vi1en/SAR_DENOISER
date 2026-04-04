@@ -1,0 +1,24 @@
+# Redis: async jobs (Step 08).
+#   docker compose up -d redis
+#   export REDIS_URL=redis://localhost:6379/0 SAR_USE_QUEUE=1
+#   rq worker sar_denoise --url $REDIS_URL
+#
+# API image (CPU): build + run with profile `api`
+#   docker compose --profile api up --build
+#   curl http://127.0.0.1:8000/health
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  api:
+    profiles: ["api"]
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      SAR_DEVICE: cpu
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      - redis

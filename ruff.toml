@@ -1,0 +1,17 @@
+line-length = 120
+target-version = "py311"
+
+exclude = [
+    ".git",
+    ".venv",
+    ".pytest_cache",
+    "__pycache__",
+    "fixes",
+    "notebooks",
+    "checkpoints_simple",
+    "checkpoints_improved",
+]
+
+[lint]
+# Optional imports after pytest.importorskip are intentional in tests.
+per-file-ignores = { "tests/**" = ["E402"] }

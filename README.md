@@ -2,6 +2,8 @@
 
 **A Deep Learning Approach to Synthetic Aperture Radar Image Denoising**
 
+**Repository layout:** runnable scripts live in **`scripts/`**, tests in **`tests/`**, shared figures in **`assets/images/`** — see [`docs/REPO_LAYOUT.md`](docs/REPO_LAYOUT.md).
+
 ---
 
 ## 📋 Table of Contents
@@ -17,15 +19,33 @@
 9. [Installation & Setup](#-installation--setup)
 10. [Usage Guide](#-usage-guide)
 11. [Future Scope](#-future-scope)
-12. [Project Structure](#-project-structure)
-13. [References](#-references)
+12. [Presentations](#️-presentations)
+13. [Project Structure](#-project-structure)
+14. [References](#-references)
+15. [Contributing](#-contributing)
+16. [License](#-license)
+17. [Acknowledgments](#-acknowledgments)
+18. [Contact & Support](#-contact--support)
+19. [Presentation Tips](#-presentation-tips)
 
 ---
 
 ## 🔗 Live Demo
 
 - **GitHub Repository**: [`Vi1en/SAR_DENOISER`](https://github.com/Vi1en/SAR_DENOISER)
-- **Web App (Live Link)**: https://sardenoise-eunmdagpnuzuo2g3cqqr9s.streamlit.app/
+- **Web App (Streamlit)**: https://sardenoise-eunmdagpnuzuo2g3cqqr9s.streamlit.app/  
+  *(After you redeploy from this repo, paste your new **Streamlit Cloud** URL here.)*
+
+### ☁️ Deploy your own (Streamlit Community Cloud — free)
+
+1. Push this repository to GitHub (`Vi1en/SAR_DENOISER`).
+2. Open [share.streamlit.io](https://share.streamlit.io) → **New app**.
+3. Repo: **`Vi1en/SAR_DENOISER`**, branch **`main`**, main file **`demo/streamlit_app.py`**.
+4. Deploy. Copy the issued `*.streamlit.app` URL into the line above.
+
+**Details:** [`docs/DEPLOY_STREAMLIT.md`](docs/DEPLOY_STREAMLIT.md) · **System packages:** `packages.txt` · **App config:** `.streamlit/config.toml`
+
+**Note:** Learned checkpoints (`*.pth`) are not committed (see `.gitignore`). The demo still runs (e.g. **TV** and uploads). To enable full DL on Cloud, host weights (Secrets URL, Release, or LFS) and point the sidebar checkpoint path if you add that flow.
 
 ---
 
@@ -44,6 +64,16 @@ This project implements a **state-of-the-art SAR (Synthetic Aperture Radar) imag
 - **Technical Innovation**: Combines optimization and deep learning
 - **Practical Solution**: Interactive web application for real-time denoising
 - **Research Contribution**: State-of-the-art performance on benchmark datasets
+
+### Features at a glance
+
+| Area | What you get |
+|------|----------------|
+| **Denoising** | ADMM-PnP-DL, direct DL, classical **TV**; speckle reduction with structure-aware metrics |
+| **Models** | **U-Net**, **Res-UNet**, DnCNN-style priors; ONNX path for light inference |
+| **Demo** | **Streamlit**: upload, SAMPLE patches, metrics (PSNR / SSIM / ENL), diff maps, blind QA, optional TTA uncertainty |
+| **Validation** | Quantitative evaluation scripts, baseline JSON, reproducible run logs |
+| **API** | Optional **FastAPI** + **Redis/RQ** for async jobs (not required for the Streamlit demo) |
 
 ---
 
@@ -210,7 +240,7 @@ This iterative process converges to a high-quality denoised image.
 - **ENL**: Equivalent Number of Looks (SAR-specific)
 - **Runtime**: Processing time analysis
 
-#### 5. Interactive Web Application (`demo/app.py`)
+#### 5. Interactive Web Application (`demo/streamlit_app.py`)
 - **Streamlit Interface**: Real-time denoising
 - **Parameter Tuning**: Interactive ADMM parameters
 - **Visualization**: Before/after comparison
@@ -263,38 +293,157 @@ This iterative process converges to a high-quality denoised image.
 pip install -r requirements.txt
 
 # 2. Download SAMPLE SAR dataset
-python download_sample_dataset.py
+python scripts/download_sample_dataset.py
 
 # 3. Verify setup
-python verify_system.py
+python scripts/verify_system.py
 ```
 
 #### Phase 2: Training
 ```bash
 # Option A: Simple training
-python train_simple.py
+python scripts/train_simple.py
 
 # Option B: Improved training (recommended)
-python train_improved.py
+python scripts/train_improved.py
 
 # Option C: Train on SAMPLE dataset
-python train_sample.py
+python scripts/train_sample.py
+
+# Option D: Improved training from YAML (reproducible; paths relative to repo root)
+python scripts/train_improved.py --config configs/train/default.yaml
+python scripts/train_improved.py --config configs/train/smoke.yaml   # 1 epoch — quick smoke test
 ```
 
 #### Phase 3: Evaluation
 ```bash
 # Evaluate on test set
-python evaluate_sample.py
+python scripts/evaluate_sample.py
+# Writes plots + evaluation_results.json under --save_dir (default results_sample/),
+# and a reproducible bundle under results/runs/<UTC>_<git_sha>/ (manifest.json, metrics.json, plots/).
+# Use --no-run-log to skip the results/runs/ bundle.
 
 # Generate performance visualizations
-python plot_recommended_comparisons.py
+python scripts/plot_recommended_comparisons.py
 ```
 
 #### Phase 4: Deployment
 ```bash
 # Launch interactive web application
-streamlit run demo/app.py
+streamlit run demo/streamlit_app.py
+# or: python sar.py streamlit
 ```
+
+#### GeoTIFF (optional, production-style I/O)
+
+Single-band, **georeferenced** GeoTIFFs only (`rasterio` is in `requirements.txt`). The CLI reads the raster in **windows** (default tile 512×512), denoises each tile, and writes a float32 GeoTIFF with the **same CRS and geotransform** as the input. **`overlap` must be 0** in this version (non-overlapping tiles; overlap blending is future work). **Nodata** pixels are left unchanged where possible.
+
+**Normalization:** each tile is min–max scaled to `[0, 1]` before the model and rescaled afterward. This does **not** infer amplitude vs dB; align with how you trained the network.
+
+```bash
+python scripts/denoise_geotiff.py \
+  --in path/to/s1_amplitude.tif \
+  --out path/to/denoised.tif \
+  --checkpoint checkpoints_improved/best_model.pth \
+  --model_type unet \
+  --method "ADMM-PnP-DL"
+```
+
+For **TV Denoising**, omit `--checkpoint`. You can also call `inference.geotiff.denoise_geotiff` and `make_tile_denoise_fn` from Python.
+
+#### HTTP API (FastAPI)
+
+Stateless JSON/PNG API (no auth in this step; see roadmap for API keys).
+
+Run **one command at a time** (or paste only the lines below). If a sentence like “omit …” ends up on its own line, the shell will try to run **`omit`** as a command (`command not found: omit`).
+
+```bash
+# Optional — only if you want this weights file for ADMM/Direct resolution:
+export SAR_CHECKPOINT=checkpoints_improved/best_model.pth
+
+# Optional overrides (defaults are fine for many setups):
+export SAR_DEVICE=auto
+export SAR_MODEL_TYPE=unet
+# Optional: YAML defaults — see configs/infer/default.yaml and SAR_INFER_CONFIG
+# (device, model_type, checkpoint, backend, onnx_path; SAR_* env vars override)
+
+uvicorn api.main:app --host 0.0.0.0 --port 8000
+```
+
+Same via **`sar.py`**: `python sar.py api -- --host 0.0.0.0 --port 8000`.
+
+Development reload:
+
+```bash
+uvicorn api.main:app --reload --port 8000
+```
+
+**Docker (CPU API):** image + Compose profile `api` (Redis included for optional job queue).
+
+```bash
+docker compose --profile api up --build
+curl -s http://127.0.0.1:8000/health
+```
+
+Weights are not baked into the image by default. Mount checkpoints, e.g.  
+`-v "$(pwd)/checkpoints_simple:/app/checkpoints_simple:ro"`, or set `SAR_CHECKPOINT` to a **path inside the container** that you mount from the host.
+
+For **TV Denoising** you do **not** need `SAR_CHECKPOINT`; skip that `export` or unset it: `unset SAR_CHECKPOINT`.
+
+- `GET /health` → `{"status":"ok","version":"0.1.0"}`, optional **`git_sha`**, plus **`direct_infer_backend`** (`pytorch` \| `onnx` from merged infer config / **`SAR_BACKEND`**) and **`onnx_path_set`** (whether an **`onnx_path`** is configured after merge — not a file-exists check).
+- `GET /ready` → **`{"status":"ready","queue":"disabled"}`** by default; when **`SAR_USE_QUEUE=1`**, returns **200** only if **`REDIS_URL`** is set and Redis answers **`PING`** (otherwise **503** for orchestrator readiness probes).
+- Optional **`SAR_ACCESS_LOG_JSON=1`** — one **JSON** line per request on logger **`sar.api.access`**; response **`X-Request-ID`** (pass your own or get a generated UUID).
+- Optional **`SAR_API_KEY`** — when set, **`POST /v1/denoise`** and **`/v1/jobs*`** require **`Authorization: Bearer <key>`** or **`X-API-Key: <key>`**; **`/health`**, **`/ready`**, and **`/docs`** stay public.
+- `POST /v1/denoise` — multipart file upload; query params include `method` (`ADMM-PnP-DL`, `Direct Denoising`, `TV Denoising`), `max_iter`, `rho_init`, `alpha`, `theta`, etc. Response is **PNG** (`image/png`). **Max upload ~20 MB** (rejected with 413). OpenAPI UI: **`/docs`**.
+
+##### Async jobs (Redis + RQ, Step 08)
+
+When **`SAR_USE_QUEUE=1`** and **`REDIS_URL`** is set, the app also exposes:
+
+- **`POST /v1/jobs`** — same query params as sync denoise; returns `{"job_id","rq_job_id"}`.
+- **`GET /v1/jobs/{job_id}`** — `{"job_id","status","error"}` with `status` in `queued` | `running` | `done` | `failed`.
+- **`GET /v1/jobs/{job_id}/result`** — PNG when `status` is `done` (HTTP 425 until then).
+
+Artifacts live under **`data/jobs/<job_id>/`** (`input.png`, `output.png`, `meta.json`, `status.json`). **Clean up old directories periodically** (cron) to control disk use.
+
+```bash
+docker compose up -d redis
+export REDIS_URL=redis://localhost:6379/0
+export SAR_USE_QUEUE=1
+# same SAR_CHECKPOINT / SAR_DEVICE as above
+
+# Terminal 1 — worker (from repo root):
+rq worker sar_denoise --url "$REDIS_URL"
+# or: python sar.py worker -- --url "$REDIS_URL"
+
+# Terminal 2 — API:
+uvicorn api.main:app --host 0.0.0.0 --port 8000
+```
+
+With **`SAR_USE_QUEUE=0`** (default), only synchronous **`/v1/denoise`** is registered for jobs; Step 07 `curl` scripts keep working.
+
+##### ONNX Direct denoising (Step 09)
+
+Export the **U-Net/DnCNN z-update** to ONNX for faster CPU inference or external runtimes (e.g. Triton later). **ADMM-PnP-DL** and **TV** still use the existing PyTorch/Python paths; only **Direct Denoising** can use ONNX.
+
+```bash
+export SAR_CHECKPOINT=checkpoints_simple/best_model.pth
+python scripts/export_onnx.py --out models_artifacts/denoiser.onnx
+python scripts/compare_pytorch_onnx.py --onnx models_artifacts/denoiser.onnx
+```
+
+Runtime:
+
+```bash
+export SAR_BACKEND=onnx
+export SAR_ONNX_PATH=models_artifacts/denoiser.onnx
+# Optional ORT providers (comma-separated):
+# export SAR_ONNX_EP=CUDAExecutionProvider,CPUExecutionProvider
+```
+
+Default is **`SAR_BACKEND=pytorch`** (unchanged). For GPU inference install **`onnxruntime-gpu`** in place of **`onnxruntime`** if desired.
+
+**Triton / full ADMM in ONNX:** out of scope for this step (see `fixes/09_optimize_model_serving.md`).
 
 ### Quick Start Workflow
 ```bash
@@ -436,14 +585,59 @@ pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
 pip install -r requirements.txt
 ```
 
+#### Troubleshooting: NumPy / Matplotlib import error
+
+If training fails with **`numpy.core.multiarray failed to import`**, **`ImportError: initialization failed`** under `matplotlib`, or **“compiled using NumPy 1.x cannot be run in NumPy 2.x”**, your Python stack has a **NumPy / Matplotlib binary mismatch** (often **conda `base`** with NumPy 2 while Matplotlib was built for NumPy 1).
+
+**Do not** run **`pip install --force-reinstall matplotlib` alone** after downgrading NumPy: current Matplotlib wheels (3.10+) will **pull NumPy 2.x back in**, break **SciPy / Numba / Streamlit**, and upgrade **Pillow / packaging** past what Streamlit allows.
+
+**Fix — reinstall the whole pinned stack in one go** (after installing PyTorch as in step 3):
+
+```bash
+pip install -r requirements.txt --upgrade --force-reinstall
+```
+
+`requirements.txt` keeps **NumPy below 2**, **Matplotlib below 3.10**, **OpenCV headless below 4.13** (4.13+ requires NumPy 2), **Pillow below 12**, and **packaging below 25** so the resolver stays consistent.
+
+**Sanity check:**
+
+```bash
+python -c "import numpy, matplotlib; print('numpy', numpy.__version__, 'matplotlib', matplotlib.__version__)"
+```
+
+You should see **numpy** `1.26.x` (or another **1.x**) and **matplotlib** `3.9.x`.
+
+**About pip’s “dependency conflicts” line after install:** `requirements.txt` caps **SciPy below 1.14** so it stays compatible with **gensim** often preinstalled in **conda base** (`gensim 4.3.x` requires `scipy<1.14`). You may still see warnings for other unrelated packages (e.g. **aext-***, **s3fs** vs **fsspec**). If `python scripts/verify_system.py` runs, those are usually safe to ignore. A **dedicated conda/venv** for this repo avoids mixed conda/pip noise entirely.
+
+**Alternative:** use a **fresh conda env** (see above), then install PyTorch and `pip install -r requirements.txt` so conda does not fight pip.
+
+#### Troubleshooting: `command not found: omit` (or other random words)
+
+That usually means a **comment or sentence was split** across lines when you pasted from a guide or chat. In zsh/bash, **only lines starting with `#` are comments** (for whole-line comments). A new line that starts with `omit`, `optional`, etc. is treated as a **command name**. Paste **one shell command per line**, or copy only from fenced `bash` blocks in this README.
+
+#### Troubleshooting: pip `ReadTimeoutError`, DNS, or flaky downloads
+
+If `pip install -r requirements.txt` fails with **`Read timed out`** on `files.pythonhosted.org` or **`nodename nor servname provided`**, try a longer timeout and retry on a stable network:
+
+```bash
+pip install -r requirements.txt --default-timeout=120
+```
+
+If **rasterio** keeps failing over pip, install it from conda-forge once, then run `pip install -r requirements.txt` again so remaining pins resolve against what is already installed:
+
+```bash
+conda install -c conda-forge rasterio
+pip install -r requirements.txt
+```
+
 #### 4. Verify Installation
 ```bash
-python verify_system.py
+python scripts/verify_system.py
 ```
 
 #### 5. Download Dataset (Optional)
 ```bash
-python download_sample_dataset.py
+python scripts/download_sample_dataset.py
 ```
 
 ---
@@ -455,27 +649,34 @@ python download_sample_dataset.py
 #### 1. Train a Model
 ```bash
 # Simple training
-python train_simple.py
+python scripts/train_simple.py
 
 # Improved training (recommended)
-python train_improved.py
+python scripts/train_improved.py
 
 # Train on SAMPLE dataset
-python train_sample.py
+python scripts/train_sample.py
+
+# Improved training from a YAML config (see configs/train/*.yaml)
+python scripts/train_improved.py --config configs/train/default.yaml
+# Same improved pipeline via train_sample (downloads if needed)
+python scripts/train_sample.py --config configs/train/default.yaml
 ```
 
 #### 2. Evaluate Models
 ```bash
 # Evaluate on test set
-python evaluate_sample.py
+python scripts/evaluate_sample.py
+# Structured run logs: results/runs/<run_id>/ (see Phase 3). --no-run-log disables them.
 
 # Generate comparison plots
-python plot_recommended_comparisons.py
+python scripts/plot_recommended_comparisons.py
 ```
 
 #### 3. Run Interactive Demo
 ```bash
-streamlit run demo/app.py
+streamlit run demo/streamlit_app.py
+# or: python sar.py streamlit
 ```
 
 ### Python API Usage
@@ -514,7 +715,7 @@ evaluator.compare_methods(evaluator.results)
 
 ### Web Application Usage
 
-1. **Launch the app**: `streamlit run demo/app.py`
+1. **Launch the app**: `streamlit run demo/streamlit_app.py` (or `python sar.py streamlit`)
 2. **Upload/Select Image**: Choose a SAR image to denoise
 3. **Adjust Parameters**: Use sliders to tune ADMM parameters
 4. **View Results**: See before/after comparison and metrics
@@ -614,10 +815,17 @@ evaluator.compare_methods(evaluator.results)
 
 ---
 
+## 📽️ Presentations
+
+All PowerPoint files are in **`presentations/`**. See **`presentations/README.md`** for the file list and how to regenerate **`project_improvements_presentation.pptx`**.
+
+---
+
 ## 📁 Project Structure
 
 ```
 FINAL_YEAR_PROJECT/
+├── presentations/                    # All .pptx decks — see presentations/README.md
 ├── data/
 │   ├── sar_simulation.py              # SAR image simulation
 │   ├── sample_dataset_downloader.py    # SAMPLE dataset download
@@ -632,12 +840,27 @@ FINAL_YEAR_PROJECT/
 │
 ├── trainers/
 │   ├── train_denoiser.py              # Denoiser training
-│   └── train_unrolled.py              # Unrolled ADMM training
+│   ├── train_unrolled.py              # Unrolled ADMM training
+│   ├── improved_trainer.py            # ImprovedTrainer (perceptual loss)
+│   ├── pipeline.py                    # run_training(TrainingConfig)
+│   ├── config_dataclass.py            # TrainingConfig defaults
+│   └── config_loader.py               # YAML → TrainingConfig
+│
+├── configs/
+│   ├── train/
+│   │   ├── default.yaml               # Default improved training
+│   │   ├── sample.yaml                # SAMPLE experiment variant
+│   │   └── smoke.yaml                 # 1-epoch CI smoke
+│   └── infer/
+│       └── default.yaml               # API inference defaults (optional)
 │
 ├── demo/
-│   ├── app.py                         # Streamlit web application
+│   ├── streamlit_app.py               # Streamlit web application
 │   ├── smart_display.py               # Display utilities
 │   └── bulletproof_display.py         # Robust display handling
+│
+├── docs/
+│   └── DEVELOPMENT.md                 # Canonical train/eval + verify commands
 │
 ├── notebooks/
 │   └── 01_data_preparation.ipynb      # Data preparation notebook
@@ -645,19 +868,58 @@ FINAL_YEAR_PROJECT/
 ├── checkpoints_improved/              # Trained models (improved)
 ├── checkpoints_simple/                # Trained models (simple)
 ├── results/                           # Evaluation results
+│   ├── baseline/                      # Frozen TV baseline + metrics.json (see README inside)
+│   └── runs/                          # Per-run manifest + metrics (evaluate_sample.py)
 │
-├── train_simple.py                    # Simple training script
-├── train_improved.py                  # Improved training script
-├── train_sample.py                   # SAMPLE dataset training
-├── evaluate_sample.py                # Evaluation script
-├── verify_system.py                   # System verification
-├── run_complete_workflow.py           # Complete workflow
+├── evaluators/
+│   └── run_logger.py                  # EvaluationRunContext (structured run artifacts)
 │
-├── plot_summary_metrics.py            # Performance visualization
-├── plot_quantitative_improvements.py  # Improvement plots
-├── plot_recommended_comparisons.py    # Comparison figures
+├── inference/
+│   ├── service.py                     # SARDenoiseService (ADMM / direct / TV; no Streamlit)
+│   ├── geotiff.py                     # Windowed GeoTIFF denoise (CRS preserved)
+│   ├── onnx_export.py                 # export_denoiser_to_onnx (torch, dynamo=False)
+│   ├── onnx_backend.py                # ONNXDirectDenoiser (ORT)
+│   └── types.py                       # DenoiseMethod, result helpers
+│
+├── models_artifacts/                  # Exported denoiser.onnx (gitignored except .gitkeep)
+│
+├── scripts/
+│   ├── denoise_geotiff.py             # CLI for GeoTIFF denoising
+│   ├── export_onnx.py                 # Checkpoint → ONNX
+│   └── compare_pytorch_onnx.py        # Parity check
+│
+├── api/
+│   ├── main.py                        # FastAPI app (health, /v1/denoise, optional /v1/jobs)
+│   ├── constants.py                  # MAX_UPLOAD_BYTES, DenoiseMethodEnum
+│   ├── deps.py                        # SARDenoiseService singleton + env
+│   ├── jobs.py                        # POST/GET /v1/jobs (SAR_USE_QUEUE=1)
+│   └── storage.py                     # data/jobs/<id>/ layout
+│
+├── workers/
+│   └── tasks.py                       # RQ task run_denoise_job
+│
+├── Dockerfile                         # CPU FastAPI image (optional)
+├── docker-compose.yml                 # redis + optional `api` profile
+│
+├── tests/
+│   ├── test_inference_service_smoke.py
+│   ├── test_geotiff_smoke.py
+│   ├── test_api_smoke.py
+│   ├── test_job_storage.py
+│   └── test_onnx_export_parity.py
+│
+├── sar.py                             # Unified CLI shim → scripts/sar.py
+├── paths.py                           # REPO_ROOT, assets/images helpers
+├── assets/images/                     # PNG figures (plots, demos)
+├── scripts/                           # Runnable entrypoints (train, eval, plots, tools)
+│   ├── sar.py                         # CLI implementation
+│   ├── train_improved.py, train_sample.py, train_simple.py, train.py
+│   ├── evaluate_sample.py, evaluate.py, verify_system.py
+│   ├── plot_*.py, download_sample_dataset.py, run_demo.py, …
+│   └── build_improvements_presentation.py
 │
 ├── requirements.txt                  # Python dependencies
+├── CONTRIBUTING.md                    # PR checklist (tests, ruff, changelog)
 ├── PROJECT_REPORT.md                  # Detailed project report
 └── README.md                          # This file
 ```
@@ -687,6 +949,8 @@ FINAL_YEAR_PROJECT/
 ## 🤝 Contributing
 
 We welcome contributions! Please follow these steps:
+
+For **canonical train/eval commands** and local checks, see **[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)**. For PR expectations (tests, ruff, changelog), see **[CONTRIBUTING.md](CONTRIBUTING.md)**.
 
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/AmazingFeature`)

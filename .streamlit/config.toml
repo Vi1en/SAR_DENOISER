@@ -1,0 +1,11 @@
+# Streamlit Cloud / local: https://docs.streamlit.io/develop/api-reference/configuration/config.toml
+[server]
+maxUploadSize = 200
+enableCORS = true
+enableXsrfProtection = true
+
+[browser]
+gatherUsageStats = false
+
+[runner]
+fastReruns = true

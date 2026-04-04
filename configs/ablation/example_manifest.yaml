@@ -1,0 +1,49 @@
+# Example ablation manifest (Upgrade 6). Copy to `manifest.yaml` and edit paths.
+# Run: `python scripts/run_ablation_grid.py --manifest configs/ablation/manifest.yaml`
+#
+# Each entry becomes one invocation of `evaluate_sample.py` with its own `--save_dir`.
+# Requires SAMPLE data at `data_dir` unless you override.
+
+schema_version: 1
+
+runs:
+  - id: direct_unet_only
+    data_dir: data/sample_sar/processed
+    save_dir: results/ablation/direct_unet_only
+    methods: [unet]
+    model_type: unet
+    batch_size: 8
+    patch_size: 128
+    no_task_metrics: false
+    no_run_log: true
+
+  - id: unet_plus_admm
+    data_dir: data/sample_sar/processed
+    save_dir: results/ablation/unet_plus_admm
+    methods: [unet, admm-pnp]
+    model_type: unet
+    batch_size: 8
+    patch_size: 128
+    no_task_metrics: true
+    no_run_log: true
+
+  # OOD / second corpus (paired clean/ + noisy/); uncomment when data exists:
+  # - id: ood_paired_unet
+  #   data_dir: data/ood_paired
+  #   data_layout: paired
+  #   dataset_tag: ood_custom
+  #   save_dir: results/ablation/ood_paired_unet
+  #   methods: [unet]
+  #   model_type: unet
+  #   batch_size: 8
+  #   patch_size: 128
+  #   no_run_log: true
+
+  # Residual U-Net (after training checkpoints_sample_res_unet/best_model.pth):
+  # - id: res_unet_direct
+  #   data_dir: data/sample_sar/processed
+  #   save_dir: results/ablation/res_unet_direct
+  #   methods: [unet]
+  #   model_type: res_unet
+  #   batch_size: 8
+  #   no_run_log: true

@@ -1,0 +1,21 @@
+{
+  "baseline_id": "sample_tv_v1",
+  "schema_version": 1,
+  "provenance": {
+    "captured_at_utc": "2026-04-03T21:41:41Z",
+    "git_sha": "232a177",
+    "source_file": "results/baseline/staging/evaluation_results.json",
+    "data_dir": "data/sample_sar/processed",
+    "evaluate_command": "PYTHONHASHSEED=0 python evaluate_sample.py --methods tv --save_dir results/baseline/staging --no-run-log --no-task-metrics --batch_size 32 --device cpu"
+  },
+  "metrics": {
+    "TV Denoising": {
+      "psnr_mean": 19.476017847129167,
+      "psnr_std": 0.0,
+      "ssim_mean": 0.6296983428084229,
+      "ssim_std": 0.0,
+      "enl_mean": 0.67300360463067,
+      "enl_std": 0.0
+    }
+  }
+}

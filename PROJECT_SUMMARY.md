@@ -39,7 +39,7 @@ This project implements a complete **ADMM-PnP-DL (Alternating Direction Method o
    - **ENL**: Equivalent Number of Looks (SAR-specific)
    - **Runtime**: Processing time analysis
 
-6. **Interactive Demo** (`demo/app.py`)
+6. **Interactive Demo** (`demo/streamlit_app.py`)
    - **Streamlit interface**: Real-time denoising
    - **Parameter tuning**: Interactive ADMM parameters
    - **Visualization**: Before/after comparison
@@ -99,7 +99,7 @@ python train.py
 python evaluate.py
 
 # 6. Interactive demo
-streamlit run demo/app.py
+streamlit run demo/streamlit_app.py
 ```
 
 ### Training
@@ -180,7 +180,7 @@ admm-pnp-dl/
 │   ├── admm_pnp.py              # ADMM-PnP algorithm
 │   └── evaluation.py             # Evaluation metrics
 ├── demo/
-│   └── app.py                    # Streamlit demo
+│   └── streamlit_app.py          # Streamlit demo
 ├── notebooks/
 │   ├── 01_data_preparation.ipynb
 │   └── 02_training_experiments.ipynb
@@ -247,7 +247,7 @@ admm-pnp-dl/
 4. **Quick demo**: `python run_demo.py`
 5. **Train models**: `python train.py`
 6. **Evaluate**: `python evaluate.py`
-7. **Interactive demo**: `streamlit run demo/app.py`
+7. **Interactive demo**: `streamlit run demo/streamlit_app.py`
 
 ## 📚 References
 

@@ -1,0 +1,30 @@
+.git
+.github
+.venv
+venv
+env
+__pycache__
+*.py[cod]
+*.pth
+*.pt
+.pytest_cache
+.ruff_cache
+.mypy_cache
+*.egg-info
+dist
+build
+
+# Large or regenerable trees (API image only needs Python sources + configs)
+data/
+notebooks/
+results/
+fixes/
+*.pptx
+.DS_Store
+.idea
+.vscode
+
+# Root-level plots / artifacts (if present)
+plot_*.png
+*_SUMMARY.md
+PROJECT_REPORT.md

@@ -104,14 +104,22 @@ class UNet(nn.Module):
         if self.noise_conditioning and noise_level is not None:
             # Add noise level as additional channel
             batch_size, _, height, width = x.shape
-            # Ensure noise_level has the right shape
-            if noise_level.dim() == 0:  # scalar
-                noise_level = noise_level.unsqueeze(0).expand(batch_size)
-            elif noise_level.dim() == 1 and noise_level.shape[0] == 1:  # single value
-                noise_level = noise_level.expand(batch_size)
-            elif noise_level.dim() == 1 and noise_level.shape[0] != batch_size:  # wrong batch size
-                noise_level = noise_level[0].unsqueeze(0).expand(batch_size)
-            noise_channel = noise_level.unsqueeze(-1).unsqueeze(-1).expand(batch_size, 1, height, width)
+            nl = noise_level
+            if nl.dim() == 0:
+                nl = nl.reshape(1).expand(batch_size)
+            elif nl.dim() == 1:
+                if nl.shape[0] == 1:
+                    nl = nl.expand(batch_size)
+                elif nl.shape[0] != batch_size:
+                    nl = nl[0].reshape(1).expand(batch_size)
+            elif nl.dim() == 2 and nl.shape[0] == batch_size and nl.shape[1] == 1:
+                nl = nl.squeeze(1)
+            elif nl.dim() == 2 and nl.shape == (1, batch_size):
+                nl = nl.squeeze(0)
+            # 4D before spatial expand (3D [B,1,1].expand(B,1,H,W) fails in PyTorch)
+            noise_channel = nl.reshape(batch_size, 1, 1, 1).expand(
+                batch_size, 1, height, width
+            )
             x = torch.cat([x, noise_channel], dim=1)
         
         x1 = self.inc(x)
@@ -178,14 +186,21 @@ class DnCNN(nn.Module):
         if self.noise_conditioning and noise_level is not None:
             # Add noise level as additional channel
             batch_size, _, height, width = x.shape
-            # Ensure noise_level has the right shape
-            if noise_level.dim() == 0:  # scalar
-                noise_level = noise_level.unsqueeze(0).expand(batch_size)
-            elif noise_level.dim() == 1 and noise_level.shape[0] == 1:  # single value
-                noise_level = noise_level.expand(batch_size)
-            elif noise_level.dim() == 1 and noise_level.shape[0] != batch_size:  # wrong batch size
-                noise_level = noise_level[0].unsqueeze(0).expand(batch_size)
-            noise_channel = noise_level.unsqueeze(-1).unsqueeze(-1).expand(batch_size, 1, height, width)
+            nl = noise_level
+            if nl.dim() == 0:
+                nl = nl.reshape(1).expand(batch_size)
+            elif nl.dim() == 1:
+                if nl.shape[0] == 1:
+                    nl = nl.expand(batch_size)
+                elif nl.shape[0] != batch_size:
+                    nl = nl[0].reshape(1).expand(batch_size)
+            elif nl.dim() == 2 and nl.shape[0] == batch_size and nl.shape[1] == 1:
+                nl = nl.squeeze(1)
+            elif nl.dim() == 2 and nl.shape == (1, batch_size):
+                nl = nl.squeeze(0)
+            noise_channel = nl.reshape(batch_size, 1, 1, 1).expand(
+                batch_size, 1, height, width
+            )
             x = torch.cat([x, noise_channel], dim=1)
         
         out = self.dncnn(x)
@@ -194,15 +209,19 @@ class DnCNN(nn.Module):
 
 def create_model(model_type='unet', **kwargs):
     """Factory function to create models"""
-    if model_type.lower() == 'unet':
+    mt = model_type.lower().replace("-", "")
+    if mt == "unet":
         return UNet(**kwargs)
-    elif model_type.lower() == 'dncnn':
+    if mt in ("resunet", "res_unet"):
+        from models.res_unet import ResUNet
+
+        return ResUNet(**kwargs)
+    if mt == "dncnn":
         # Map n_channels to channels for DnCNN
         if 'n_channels' in kwargs:
             kwargs['channels'] = kwargs.pop('n_channels')
         return DnCNN(**kwargs)
-    else:
-        raise ValueError(f"Unknown model type: {model_type}")
+    raise ValueError(f"Unknown model type: {model_type}")
 
 
 if __name__ == "__main__":

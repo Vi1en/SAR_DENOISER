@@ -1,0 +1,15 @@
+# Default improved training — matches ``TrainingConfig`` / historical ``train_improved.py``.
+# Paths are relative to the repository root.
+
+seed: 42
+device: auto
+data_dir: data/sample_sar/processed
+patch_size: 128
+batch_size: 8
+num_workers: 2
+epochs: 20
+lr: 0.0002
+model_type: unet
+noise_conditioning: false
+checkpoint_dir: checkpoints_improved
+results_png: improved_training_results.png

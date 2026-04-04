@@ -7,9 +7,15 @@ import numpy as np
 import matplotlib.pyplot as plt
 import cv2
 from PIL import Image
+import csv
+import hashlib
 import io
 import os
+import random
+import re
+import tempfile
 import time
+import zipfile
 from datetime import datetime
 
 # Import our modules
@@ -21,10 +27,162 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from models.unet import create_model
-from algos.admm_pnp import ADMMPnP, TVDenoiser
-from algos.evaluation import calculate_metrics
+from algos.evaluation import calculate_metrics, calculate_ssim
+from api import storage as job_storage
+from api.infer_config import get_merged, service_options_from_merged
+from inference.geotiff import denoise_geotiff, make_tile_denoise_fn
+from inference.service import SARDenoiseService, replay_messages_streamlit
+from inference.uncertainty import uncertainty_to_vis_u8
 from data.sar_simulation import SARSimulator
+
+
+def comparison_blend_noisy_denoised(
+    noisy: np.ndarray, denoised: np.ndarray, alpha: float
+) -> np.ndarray:
+    """Blend: ``alpha * denoised + (1 - alpha) * noisy``, clipped to [0, 1]."""
+    n = noisy.astype(np.float32)
+    d = denoised.astype(np.float32)
+    out = float(alpha) * d + (1.0 - float(alpha)) * n
+    return np.clip(out, 0.0, 1.0)
+
+
+def comparison_abs_diff_map(noisy: np.ndarray, denoised: np.ndarray) -> np.ndarray:
+    """|noisy − denoised| with 99th-percentile stretch for display in [0, 1]."""
+    diff = np.abs(noisy.astype(np.float64) - denoised.astype(np.float64))
+    p99 = float(np.percentile(diff, 99)) if diff.size else 1.0
+    return np.clip(diff / (p99 + 1e-8), 0.0, 1.0).astype(np.float32)
+
+
+def load_sample_noisy_patch_float01(noisy_dir: str, filename: str):
+    """
+    Load one noisy SAMPLE patch as float32 in [0, 1].
+
+    Returns a new contiguous array per call (never a shared view), so grids and
+    batch lists cannot accidentally alias the same buffer.
+    """
+    path = os.path.join(noisy_dir, filename)
+    if not os.path.isfile(path):
+        return None
+    arr = cv2.imread(path, cv2.IMREAD_GRAYSCALE)
+    if arr is None:
+        return None
+    return np.ascontiguousarray(arr.astype(np.float32) / 255.0)
+
+
+def contrast_stretch_display_float01(img: np.ndarray) -> np.ndarray:
+    """Per-image min–max normalize to [0, 1] for display only (inference unchanged)."""
+    a = np.asarray(img, dtype=np.float32)
+    lo = float(np.min(a))
+    hi = float(np.max(a))
+    if hi <= lo + 1e-8:
+        return np.clip(a, 0.0, 1.0)
+    return np.clip((a - lo) / (hi - lo), 0.0, 1.0).astype(np.float32)
+
+
+def sample_patch_stats(img: np.ndarray) -> dict:
+    """Scalar stats for a single-channel float patch."""
+    a = np.asarray(img, dtype=np.float64)
+    return {
+        "mean": float(np.mean(a)),
+        "std": float(np.std(a)),
+        "min": float(np.min(a)),
+        "max": float(np.max(a)),
+    }
+
+
+def sample_pair_diff_display(img1: np.ndarray, img2: np.ndarray) -> np.ndarray:
+    """|img1 − img2| stretched with 99th-percentile for visible difference maps."""
+    d = np.abs(img1.astype(np.float64) - img2.astype(np.float64))
+    p99 = float(np.percentile(d, 99)) if d.size else 1.0
+    return np.clip(d / (p99 + 1e-8), 0.0, 1.0).astype(np.float32)
+
+
+def sample_array_hash_prefix(arr: np.ndarray, prefix_len: int = 16) -> str:
+    """SHA256 over raw float32 bytes (contiguous); prefix for compact UI."""
+    a = np.ascontiguousarray(np.asarray(arr, dtype=np.float32))
+    return hashlib.sha256(a.tobytes()).hexdigest()[:prefix_len]
+
+
+def sample_pair_diff_normalized_by_max(img1: np.ndarray, img2: np.ndarray) -> np.ndarray:
+    """|img1 − img2| normalized by max(|diff|) + ε for display in [0, 1]."""
+    d = np.abs(img1.astype(np.float64) - img2.astype(np.float64))
+    mx = float(np.max(d)) if d.size else 0.0
+    return np.clip(d / (mx + 1e-8), 0.0, 1.0).astype(np.float32)
+
+
+def similarity_verdict_mad(mad: float) -> tuple[str, str]:
+    """Returns (label, level) where level is success | warning | info."""
+    if mad < 0.002:
+        return "Nearly identical", "warning"
+    if mad < 0.02:
+        return "Similar", "info"
+    return "Clearly different", "success"
+
+
+def load_job_history_entries(limit: int = 100):
+    """
+    List async denoise jobs under :func:`~api.storage.jobs_root` (read-only).
+    One row per directory that contains ``meta.json``; newest ``mtime`` first.
+    """
+    root = job_storage.jobs_root()
+    if not root.is_dir():
+        return root, []
+    entries = []
+    for p in root.iterdir():
+        if not p.is_dir():
+            continue
+        if not (p / "meta.json").is_file():
+            continue
+        job_id = p.name
+        try:
+            meta = job_storage.read_meta(job_id)
+        except Exception:
+            meta = {"_error": "could not parse meta.json", "job_id": job_id}
+        st_obj = job_storage.read_status(job_id) or {}
+        status = st_obj.get("status", "unknown")
+        err = st_obj.get("error")
+        try:
+            mtime = p.stat().st_mtime
+        except OSError:
+            mtime = 0.0
+        entries.append(
+            {
+                "job_id": job_id,
+                "path": p,
+                "meta": meta,
+                "status": status,
+                "error": err,
+                "mtime": mtime,
+            }
+        )
+    entries.sort(key=lambda e: e["mtime"], reverse=True)
+    return root, entries[:limit]
+
+
+def safe_batch_png_name(original_name: str, index: int) -> str:
+    """Filesystem-safe PNG name; preserves order via numeric prefix."""
+    stem = Path(original_name).stem
+    stem = re.sub(r"[^a-zA-Z0-9._-]+", "_", stem).strip("._-") or "image"
+    stem = stem[:60]
+    return f"{index:04d}_{stem}.png"
+
+
+def normalize_images_shared_range(images: list[np.ndarray]) -> list[np.ndarray]:
+    """Map each image to [0, 1] using one global min/max across all (fair visual comparison)."""
+    if not images:
+        return []
+    arrs = [np.asarray(x, dtype=np.float32) for x in images]
+    stacked = np.stack(arrs, axis=0)
+    lo = float(np.min(stacked))
+    hi = float(np.max(stacked))
+    if hi <= lo + 1e-8:
+        return [np.clip(a, 0.0, 1.0) for a in arrs]
+    scale = hi - lo
+    return [np.clip((a - lo) / scale, 0.0, 1.0) for a in arrs]
+
+
+# Order for multi-method run: TV → Direct → ADMM (matches typical classical → DL progression)
+MULTI_METHOD_ORDER = ("TV Denoising", "Direct Denoising", "ADMM-PnP-DL")
 
 
 # Page configuration
@@ -76,8 +234,8 @@ st.sidebar.title("Configuration")
 # Model selection
 model_type = st.sidebar.selectbox(
     "Select Denoiser Model",
-    ["U-Net", "DnCNN"],
-    help="Choose the deep learning denoiser architecture"
+    ["U-Net", "DnCNN", "Res-U-Net"],
+    help="Choose the deep learning denoiser architecture",
 )
 
 # ADMM parameters
@@ -128,8 +286,57 @@ psf_sigma = st.sidebar.slider("PSF Sigma", 0.5, 3.0, 1.0, help="Point spread fun
 method = st.sidebar.selectbox(
     "Denoising Method",
     ["ADMM-PnP-DL", "Direct Denoising", "TV Denoising"],
-    help="Choose the denoising approach"
+    help="Choose the denoising approach",
 )
+
+direct_show_uncertainty = False
+uncertainty_tta_passes = 4
+if method == "Direct Denoising":
+    st.sidebar.subheader("Direct: uncertainty (TTA)")
+    direct_show_uncertainty = st.sidebar.checkbox(
+        "Pixelwise uncertainty (TTA)",
+        value=False,
+        help="Test-time flips/rotations: std across predictions as a cheap spread map. "
+        "Use images at least ~32×32 px (larger is safer for U-Net).",
+    )
+    uncertainty_tta_passes = st.sidebar.slider(
+        "TTA passes",
+        min_value=1,
+        max_value=4,
+        value=4,
+        help="1 = identity only; up to 4 = id + hflip + vflip + rot90.",
+    )
+
+st.sidebar.subheader("Quality diagnostics")
+include_blind_qa_sidebar = st.sidebar.checkbox(
+    "Blind QA metrics (no-reference)",
+    value=True,
+    help="Optional: ENL-like estimate (homogeneous blocks), edge preservation vs input, variance stats — in **Run Denoising** results.",
+)
+
+
+def build_streamlit_denoise_kw(with_direct_uncertainty: bool) -> dict:
+    """Sidebar → kwargs for :meth:`~SARDenoiseService.denoise_numpy` (single- and multi-method)."""
+    kw = dict(
+        model_type=model_type,
+        max_iter=max_iter,
+        rho_init=rho_init,
+        alpha=alpha,
+        theta=theta,
+        use_log_transform=use_log_transform,
+        disable_denoising=disable_denoising,
+        quality_enhancement=quality_enhancement,
+        speckle_factor=speckle_factor,
+    )
+    if (
+        with_direct_uncertainty
+        and method == "Direct Denoising"
+        and direct_show_uncertainty
+    ):
+        kw["return_uncertainty"] = True
+        kw["uncertainty_tta_passes"] = int(uncertainty_tta_passes)
+    return kw
+
 
 # Main content
 col1, col2 = st.columns([1, 1])
@@ -143,60 +350,674 @@ with col1:
         type=['png', 'jpg', 'jpeg', 'tiff'],
         help="Upload a single-channel SAR image for denoising"
     )
-    
-    # Load sample from SAMPLE dataset option
-    if st.button("🎲 Load Sample from SAMPLE Dataset"):
-        with st.spinner("Loading sample from SAMPLE dataset..."):
-            # Load a sample from our SAMPLE dataset
-            sample_dir = "data/sample_sar/processed/test_patches"
-            clean_dir = os.path.join(sample_dir, "clean")
-            noisy_dir = os.path.join(sample_dir, "noisy")
-            
-            if os.path.exists(clean_dir) and os.path.exists(noisy_dir):
-                # Get a random sample
-                clean_files = [f for f in os.listdir(clean_dir) if f.endswith('.png')]
-                if clean_files:
-                    import random
-                    sample_file = random.choice(clean_files)
-                    
-                    # Load clean and noisy images
-                    clean_path = os.path.join(clean_dir, sample_file)
-                    noisy_path = os.path.join(noisy_dir, sample_file)
-                    
+
+    BATCH_MAX_FILES = 40
+    BATCH_MAX_BYTES_PER_FILE = 20 * 1024 * 1024
+
+    with st.expander("Batch processing — multiple images → ZIP", expanded=False):
+        st.caption(
+            "Uses the sidebar **Denoising Method** and parameters. "
+            f"Up to **{BATCH_MAX_FILES}** files, **{BATCH_MAX_BYTES_PER_FILE // (1024 * 1024)} MB** each; "
+            "one image loaded at a time to limit memory."
+        )
+        batch_files = st.file_uploader(
+            "Upload multiple SAR images",
+            type=["png", "jpg", "jpeg", "tiff"],
+            accept_multiple_files=True,
+            key="sar_batch_uploader",
+        )
+        if batch_files and len(batch_files) > BATCH_MAX_FILES:
+            st.warning(f"Only the first **{BATCH_MAX_FILES}** files will be processed.")
+
+        if st.button("Process batch & build ZIP", key="sar_batch_process_btn"):
+            todo = list(batch_files or [])[:BATCH_MAX_FILES]
+            if not todo:
+                st.error("Upload at least one image in the batch uploader above.")
+            else:
+                with st.spinner(f"Denoising {len(todo)} image(s)…"):
+                    device_str = "cuda" if torch.cuda.is_available() else "cpu"
+                    opts = service_options_from_merged()
+                    svc = SARDenoiseService(
+                        device=device_str,
+                        infer_backend=opts["infer_backend"],
+                        onnx_path=opts["onnx_path"],
+                    )
+                    kw = build_streamlit_denoise_kw(with_direct_uncertainty=False)
+                    manifest_rows = []
+                    zip_buffer = io.BytesIO()
+                    try:
+                        with tempfile.TemporaryDirectory() as tmpdir:
+                            tmp_path = Path(tmpdir)
+                            out_idx = 0
+                            for uf in todo:
+                                raw = uf.getvalue()
+                                if len(raw) > BATCH_MAX_BYTES_PER_FILE:
+                                    st.warning(
+                                        f"Skipped **{uf.name}** (exceeds {BATCH_MAX_BYTES_PER_FILE // (1024 * 1024)} MB)."
+                                    )
+                                    continue
+                                try:
+                                    pil = Image.open(io.BytesIO(raw)).convert("L")
+                                except Exception as e:
+                                    st.warning(f"Skipped **{uf.name}** (invalid image: {e})")
+                                    continue
+                                arr = np.asarray(pil, dtype=np.float32) / 255.0
+                                del pil, raw
+                                t0 = time.perf_counter()
+                                out = svc.denoise_numpy(arr, method, **kw)
+                                elapsed = time.perf_counter() - t0
+                                den = np.clip(np.asarray(out["denoised"], dtype=np.float32), 0.0, 1.0)
+                                del out, arr
+                                png_name = safe_batch_png_name(uf.name, out_idx)
+                                out_idx += 1
+                                out_png = tmp_path / png_name
+                                Image.fromarray((den * 255.0).astype(np.uint8)).save(
+                                    out_png, format="PNG"
+                                )
+                                del den
+                                manifest_rows.append(
+                                    [uf.name, method, f"{elapsed:.6f}"]
+                                )
+
+                            man_path = tmp_path / "manifest.csv"
+                            with man_path.open("w", newline="", encoding="utf-8") as mf:
+                                w = csv.writer(mf)
+                                w.writerow(["filename", "method", "time_seconds"])
+                                w.writerows(manifest_rows)
+
+                            with zipfile.ZipFile(
+                                zip_buffer, "w", compression=zipfile.ZIP_DEFLATED
+                            ) as zf:
+                                for p in sorted(tmp_path.iterdir()):
+                                    zf.write(p, arcname=p.name)
+                    except Exception as e:
+                        st.error(f"Batch failed: {e}")
+                    else:
+                        if not manifest_rows:
+                            st.error("No outputs written (all files skipped or failed).")
+                        else:
+                            st.session_state["batch_zip_bytes"] = zip_buffer.getvalue()
+                            st.session_state["batch_zip_filename"] = (
+                                f"sar_denoised_batch_{int(time.time())}.zip"
+                            )
+                            st.success(
+                                f"Ready: **{len(manifest_rows)}** PNG(s) + **manifest.csv**."
+                            )
+
+    if st.session_state.get("batch_zip_bytes"):
+        st.download_button(
+            label="Download batch ZIP",
+            data=st.session_state["batch_zip_bytes"],
+            file_name=st.session_state.get(
+                "batch_zip_filename", "sar_denoised_batch.zip"
+            ),
+            mime="application/zip",
+            key="sar_batch_zip_download",
+        )
+
+    with st.expander("GeoTIFF — georeferenced tile denoise", expanded=False):
+        st.caption(
+            "**Single-band** GeoTIFF with **CRS** (transform + metadata preserved via "
+            "**`inference.geotiff.denoise_geotiff`** and **rasterio**). Uses the sidebar "
+            "**Denoising Method** and parameters; weights follow **`configs/infer`** / **`SAR_CHECKPOINT`** "
+            "when required (same as the **`scripts/denoise_geotiff.py`** CLI)."
+        )
+        geotiff_file = st.file_uploader(
+            "Upload GeoTIFF (.tif / .tiff)",
+            type=["tif", "tiff"],
+            key="streamlit_geotiff_uploader",
+        )
+        geotiff_tile = st.number_input(
+            "Tile size (pixels)",
+            min_value=64,
+            max_value=4096,
+            value=512,
+            step=64,
+            key="streamlit_geotiff_tile",
+        )
+        if st.button("Run GeoTIFF denoising", type="secondary", key="streamlit_geotiff_run"):
+            if geotiff_file is None:
+                st.error("Upload a GeoTIFF first.")
+            else:
+                try:
+                    import rasterio
+                except ImportError:
+                    st.error(
+                        "**rasterio** is not installed. Install project requirements "
+                        "(e.g. `pip install rasterio`)."
+                    )
+                else:
+                    gt_raw = geotiff_file.getvalue()
+                    if len(gt_raw) > 500 * 1024 * 1024:
+                        st.error("File exceeds **500 MB** demo limit.")
+                    else:
+                        with st.spinner("Denoising GeoTIFF (windowed)…"):
+                            try:
+                                merged = get_merged()
+                                ck = merged.get("checkpoint")
+                                ckpt = (
+                                    Path(str(ck)).resolve()
+                                    if ck not in (None, "")
+                                    else None
+                                )
+                                imp_ck = ckpt if method == "ADMM-PnP-DL" else None
+                                sim_ck = ckpt if method == "Direct Denoising" else None
+
+                                device_str = "cuda" if torch.cuda.is_available() else "cpu"
+                                opts = service_options_from_merged()
+                                gt_svc = SARDenoiseService(
+                                    device=device_str,
+                                    improved_checkpoint=imp_ck,
+                                    simple_checkpoint=sim_ck,
+                                    infer_backend=opts["infer_backend"],
+                                    onnx_path=opts["onnx_path"],
+                                )
+                                gt_kw = build_streamlit_denoise_kw(
+                                    with_direct_uncertainty=False
+                                )
+                                if method == "Direct Denoising" and ckpt is not None:
+                                    gt_kw["direct_checkpoint"] = ckpt
+
+                                tile_fn = make_tile_denoise_fn(gt_svc, method, **gt_kw)
+
+                                with tempfile.TemporaryDirectory() as gt_tmpdir:
+                                    gt_in = Path(gt_tmpdir) / "input.tif"
+                                    gt_out = Path(gt_tmpdir) / "denoised.tif"
+                                    gt_in.write_bytes(gt_raw)
+                                    with rasterio.open(gt_in) as _src:
+                                        if _src.crs is None:
+                                            raise ValueError(
+                                                "Raster has no CRS — expected a georeferenced GeoTIFF."
+                                            )
+                                        if int(_src.count) != 1:
+                                            raise ValueError(
+                                                f"Expected a single-band raster; got count={_src.count}."
+                                            )
+                                    denoise_geotiff(
+                                        gt_in,
+                                        gt_out,
+                                        tile_fn,
+                                        tile_size=int(geotiff_tile),
+                                        overlap=0,
+                                    )
+                                    gt_bytes = gt_out.read_bytes()
+
+                                stem = Path(geotiff_file.name).stem
+                                safe_gt = re.sub(r"[^a-zA-Z0-9._-]+", "_", stem).strip(
+                                    "._-"
+                                )[:80] or "denoised"
+                                st.session_state["streamlit_geotiff_out"] = gt_bytes
+                                st.session_state["streamlit_geotiff_fn"] = (
+                                    f"{safe_gt}_denoised.tif"
+                                )
+                                st.success("GeoTIFF ready — download below.")
+                            except Exception as e:
+                                st.error(f"GeoTIFF processing failed: {e}")
+
+        if st.session_state.get("streamlit_geotiff_out"):
+            st.download_button(
+                "Download denoised GeoTIFF",
+                data=st.session_state["streamlit_geotiff_out"],
+                file_name=st.session_state.get(
+                    "streamlit_geotiff_fn", "denoised.tif"
+                ),
+                mime="image/tiff",
+                key="streamlit_geotiff_download",
+            )
+
+    # Load sample from SAMPLE dataset (user-selected patch, not random)
+    sample_dir = "data/sample_sar/processed/test_patches"
+    clean_dir = os.path.join(sample_dir, "clean")
+    noisy_dir = os.path.join(sample_dir, "noisy")
+
+    if os.path.exists(clean_dir) and os.path.exists(noisy_dir):
+        sample_png_files = sorted(
+            f for f in os.listdir(clean_dir) if f.lower().endswith(".png")
+        )
+        if not sample_png_files:
+            st.warning("No PNG files found in SAMPLE dataset clean folder.")
+        else:
+            selected_sample = st.selectbox(
+                "Select Sample Image",
+                sample_png_files,
+                key="sample_dataset_png",
+            )
+            if st.button("Load selected sample from SAMPLE dataset"):
+                with st.spinner("Loading sample from SAMPLE dataset..."):
+                    clean_path = os.path.join(clean_dir, selected_sample)
+                    noisy_path = os.path.join(noisy_dir, selected_sample)
+                    clean_image = None
+                    noisy_image = None
+
                     if os.path.exists(clean_path) and os.path.exists(noisy_path):
                         clean_image = cv2.imread(clean_path, cv2.IMREAD_GRAYSCALE)
                         noisy_image = cv2.imread(noisy_path, cv2.IMREAD_GRAYSCALE)
-                        
+
                         if clean_image is not None and noisy_image is not None:
-                            # Normalize to [0, 1]
                             clean_image = clean_image.astype(np.float32) / 255.0
                             noisy_image = noisy_image.astype(np.float32) / 255.0
                         else:
                             st.error("Failed to load sample images")
-                            clean_image = None
-                            noisy_image = None
                     else:
-                        st.error("Sample image files not found")
-                        clean_image = None
-                        noisy_image = None
+                        st.error("Sample image files not found for selected patch")
+
+                    if clean_image is not None and noisy_image is not None:
+                        st.session_state["clean_image"] = clean_image
+                        st.session_state["noisy_image"] = noisy_image
+                        st.session_state["image_source"] = "sample"
+                        st.success("✅ Loaded selected sample from SAMPLE dataset!")
+                    else:
+                        st.session_state["clean_image"] = None
+                        st.session_state["noisy_image"] = None
+
+            with st.expander("📊 SAMPLE dataset grid viewer", expanded=False):
+                st.caption(
+                    "Preview multiple noisy patches at once. Does not replace the "
+                    "single-image workspace above (selectbox + Load selected sample)."
+                )
+                max_grid = min(12, len(sample_png_files))
+                default_grid_n = min(4, max_grid)
+                n_grid = st.slider(
+                    "Number of images",
+                    min_value=1,
+                    max_value=max_grid,
+                    value=default_grid_n,
+                    key="sample_dataset_grid_n",
+                )
+                prev_n = st.session_state.get("_sample_dataset_grid_n_prev")
+                if prev_n is not None and prev_n != n_grid:
+                    st.session_state.pop("sample_grid_random_filenames", None)
+                st.session_state["_sample_dataset_grid_n_prev"] = n_grid
+
+                btn_rand_col, btn_reset_col = st.columns(2)
+                with btn_rand_col:
+                    if st.button("Load N random samples", key="sample_grid_random_btn"):
+                        k = min(n_grid, len(sample_png_files))
+                        st.session_state["sample_grid_random_filenames"] = random.sample(
+                            sample_png_files, k
+                        )
+                with btn_reset_col:
+                    if st.button("Show first N (sorted)", key="sample_grid_first_n_btn"):
+                        st.session_state.pop("sample_grid_random_filenames", None)
+
+                picked = st.session_state.get("sample_grid_random_filenames")
+                if picked is not None and len(picked) != n_grid:
+                    st.session_state.pop("sample_grid_random_filenames", None)
+                    picked = None
+                if picked is None:
+                    picked = sample_png_files[:n_grid]
+
+                grid_images = []
+                for fn in picked:
+                    patch = load_sample_noisy_patch_float01(noisy_dir, fn)
+                    if patch is not None:
+                        grid_images.append((patch, fn))
+
+                if not grid_images:
+                    st.info("Could not load images for the current selection.")
                 else:
-                    st.error("No sample images found in SAMPLE dataset")
-                    clean_image = None
-                    noisy_image = None
-            else:
-                st.error("SAMPLE dataset not found. Please run: python download_sample_dataset.py")
-                clean_image = None
-                noisy_image = None
-            
-            # Store in session state
-            if clean_image is not None and noisy_image is not None:
-                st.session_state['clean_image'] = clean_image
-                st.session_state['noisy_image'] = noisy_image
-                st.session_state['image_source'] = 'sample'
-                st.success("✅ Loaded sample from SAMPLE dataset!")
-            else:
-                st.session_state['clean_image'] = None
-                st.session_state['noisy_image'] = None
+                    grid_names = [fn for _, fn in grid_images]
+                    stretch_thumbs = st.checkbox(
+                        "Contrast-stretch thumbnails (per-image min–max, display only)",
+                        value=False,
+                        key="sample_grid_stretch_thumbs",
+                    )
+
+                    def _thumb(arr):
+                        return (
+                            contrast_stretch_display_float01(arr)
+                            if stretch_thumbs
+                            else arr
+                        )
+
+                    # One st.image() per row with a *list* of arrays — avoids Streamlit
+                    # mis-binding repeated st.image calls inside nested st.columns() loops
+                    # (symptom: same thumbnail shown for every cell).
+                    ncols = 3
+                    for row_start in range(0, len(grid_images), ncols):
+                        chunk = grid_images[row_start : row_start + ncols]
+                        st.image(
+                            [_thumb(p[0]) for p in chunk],
+                            caption=[p[1] for p in chunk],
+                            use_container_width=True,
+                            clamp=True,
+                        )
+
+                    # Streamlit forbids nested expanders — use subheaders inside the parent grid expander.
+                    st.subheader("📈 Per-patch statistics")
+                    st.caption(
+                        "Raw **[0, 1]** float stats (same arrays used for inference / batch). "
+                        "**Hash** = SHA256(float32 bytes), first 16 hex chars — unique per distinct array."
+                    )
+                    for arr, name in grid_images:
+                        st.write(f"**{name}**")
+                        st.write(sample_patch_stats(arr))
+                        st.write("Hash:", sample_array_hash_prefix(arr))
+
+                    st.divider()
+                    st.subheader("🔬 Image Similarity Analysis")
+                    st.caption(
+                        "Quantitative **A vs B** comparison on raw **[0, 1]** patches (display-only). "
+                        "**SSIM** treats A as reference and B as comparison (symmetric for equal shape)."
+                    )
+                    cmp_stretch = st.checkbox(
+                        "Contrast-stretch A & B for display",
+                        value=True,
+                        key="sample_cmp_stretch_ab",
+                    )
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        cmp_a = st.selectbox(
+                            "Image A",
+                            grid_names,
+                            key="sample_cmp_img_a",
+                        )
+                    with c2:
+                        cmp_b = st.selectbox(
+                            "Image B",
+                            grid_names,
+                            index=min(1, len(grid_names) - 1),
+                            key="sample_cmp_img_b",
+                        )
+                    arr_a = next(a for a, n in grid_images if n == cmp_a)
+                    arr_b = next(a for a, n in grid_images if n == cmp_b)
+                    disp_a = (
+                        contrast_stretch_display_float01(arr_a)
+                        if cmp_stretch
+                        else arr_a
+                    )
+                    disp_b = (
+                        contrast_stretch_display_float01(arr_b)
+                        if cmp_stretch
+                        else arr_b
+                    )
+                    diff_abs = np.abs(arr_a.astype(np.float64) - arr_b.astype(np.float64))
+                    mad = float(np.mean(diff_abs))
+                    max_diff = float(np.max(diff_abs))
+                    diff_norm_max = sample_pair_diff_normalized_by_max(arr_a, arr_b)
+                    try:
+                        ssim_ab = float(calculate_ssim(arr_a, arr_b))
+                    except Exception:
+                        ssim_ab = float("nan")
+
+                    st.image(
+                        [disp_a, disp_b, diff_norm_max],
+                        caption=[
+                            f"A: {cmp_a}",
+                            f"B: {cmp_b}",
+                            "Normalized Difference Map",
+                        ],
+                        use_container_width=True,
+                        clamp=True,
+                    )
+
+                    ha = sample_array_hash_prefix(arr_a)
+                    hb = sample_array_hash_prefix(arr_b)
+                    st.write(f"**Identity (SHA256 prefix)** — A: `{ha}` · B: `{hb}`")
+                    if ha == hb:
+                        st.warning(
+                            "Hashes match — same float32 payload (identical arrays in memory)."
+                        )
+
+                    m1, m2, m3 = st.columns(3)
+                    with m1:
+                        st.metric("MAD", f"{mad:.6f}")
+                    with m2:
+                        st.metric("Max Diff", f"{max_diff:.6f}")
+                    with m3:
+                        st.metric(
+                            "SSIM (A, B)",
+                            "—" if np.isnan(ssim_ab) else f"{ssim_ab:.4f}",
+                        )
+
+                    verdict, level = similarity_verdict_mad(mad)
+                    if level == "warning":
+                        st.warning(f"**Verdict:** {verdict} (mean |A−B| < 0.002).")
+                    elif level == "info":
+                        st.info(f"**Verdict:** {verdict} (0.002 ≤ MAD < 0.02).")
+                    else:
+                        st.success(f"**Verdict:** {verdict} (MAD ≥ 0.02).")
+
+                    show_ab_hist = st.checkbox(
+                        "Histogram comparison (A vs B, matplotlib)",
+                        value=False,
+                        key="sample_sim_ab_hist",
+                    )
+                    if show_ab_hist:
+                        fig, ax = plt.subplots(figsize=(6, 2.8))
+                        ax.hist(
+                            arr_a.ravel(),
+                            bins=32,
+                            range=(0.0, 1.0),
+                            alpha=0.55,
+                            color="tab:blue",
+                            label="A",
+                            edgecolor="white",
+                            linewidth=0.4,
+                        )
+                        ax.hist(
+                            arr_b.ravel(),
+                            bins=32,
+                            range=(0.0, 1.0),
+                            alpha=0.55,
+                            color="tab:orange",
+                            label="B",
+                            edgecolor="white",
+                            linewidth=0.4,
+                        )
+                        ax.set_xlim(0.0, 1.0)
+                        ax.set_xlabel("Intensity")
+                        ax.set_ylabel("Count")
+                        ax.set_title("Pixel distribution — A vs B")
+                        ax.legend(loc="upper right")
+                        ax.grid(True, alpha=0.3)
+                        st.pyplot(fig)
+                        plt.close(fig)
+
+                    st.divider()
+                    st.subheader("🔍 Zoom crop & histogram")
+                    st.caption(
+                        "Inspect a **ROI** with contrast-stretched view; histogram uses raw **[0, 1]** bins."
+                    )
+                    zoom_name = st.selectbox(
+                        "Patch for zoom",
+                        grid_names,
+                        key="sample_zoom_pick",
+                    )
+                    zarr = next(a for a, n in grid_images if n == zoom_name)
+                    zh, zw = int(zarr.shape[0]), int(zarr.shape[1])
+                    zc1, zc2 = st.columns(2)
+                    with zc1:
+                        y1 = st.slider(
+                            "y1 (row start)",
+                            0,
+                            max(0, zh - 2),
+                            0,
+                            key="sample_zoom_y1",
+                        )
+                        y2 = st.slider(
+                            "y2 (row end, exclusive)",
+                            min(y1 + 1, zh - 1),
+                            zh,
+                            min(y1 + min(32, zh), zh),
+                            key="sample_zoom_y2",
+                        )
+                    with zc2:
+                        x1 = st.slider(
+                            "x1 (col start)",
+                            0,
+                            max(0, zw - 2),
+                            0,
+                            key="sample_zoom_x1",
+                        )
+                        x2 = st.slider(
+                            "x2 (col end, exclusive)",
+                            min(x1 + 1, zw - 1),
+                            zw,
+                            min(x1 + min(32, zw), zw),
+                            key="sample_zoom_x2",
+                        )
+                    if y2 <= y1 or x2 <= x1:
+                        st.warning("Invalid ROI — adjust sliders.")
+                    else:
+                        crop = zarr[y1:y2, x1:x2]
+                        st.write(
+                            {
+                                "crop_shape": list(crop.shape),
+                                "crop_mean": float(np.mean(crop)),
+                                "crop_std": float(np.std(crop)),
+                                "crop_min": float(np.min(crop)),
+                                "crop_max": float(np.max(crop)),
+                            }
+                        )
+                        st.image(
+                            [
+                                zarr,
+                                contrast_stretch_display_float01(crop),
+                            ],
+                            caption=[
+                                f"Full patch ({zoom_name})",
+                                f"Zoom (contrast-stretched) [{y1}:{y2}, {x1}:{x2}]",
+                            ],
+                            use_container_width=True,
+                            clamp=True,
+                        )
+                    show_hist = st.checkbox(
+                        "Show pixel histogram (full patch, matplotlib)",
+                        value=False,
+                        key="sample_zoom_hist",
+                    )
+                    if show_hist:
+                        fig, ax = plt.subplots(figsize=(6, 2.2))
+                        ax.hist(
+                            zarr.ravel(),
+                            bins=32,
+                            range=(0.0, 1.0),
+                            color="steelblue",
+                            edgecolor="white",
+                            linewidth=0.5,
+                        )
+                        ax.set_xlim(0.0, 1.0)
+                        ax.set_xlabel("Intensity")
+                        ax.set_ylabel("Count")
+                        ax.set_title(f"Histogram — {zoom_name}")
+                        ax.grid(True, alpha=0.3)
+                        st.pyplot(fig)
+                        plt.close(fig)
+
+                    st.divider()
+                    st.markdown(
+                        "**Batch denoising (SAMPLE)** — uses the sidebar **Denoising Method**; "
+                        "at most **8** patches per run to limit compute."
+                    )
+                    _SAMPLE_BATCH_CAP = 8
+                    batch_cap = min(_SAMPLE_BATCH_CAP, len(grid_images))
+                    n_batch = st.slider(
+                        "Batch denoise count",
+                        min_value=1,
+                        max_value=batch_cap,
+                        value=min(4, batch_cap),
+                        key="sample_dataset_batch_n",
+                        help="Number of patches from the current grid (first N of the selection) to denoise together.",
+                    )
+                    batch_entries = grid_images[:n_batch]
+                    new_batch_sig = tuple(fn for _, fn in batch_entries)
+                    if st.session_state.get("_sample_batch_denoise_sig") != new_batch_sig:
+                        st.session_state.pop("batch_denoise_results", None)
+                    st.session_state["_sample_batch_denoise_sig"] = new_batch_sig
+                    st.session_state["batch_images"] = [
+                        np.ascontiguousarray(arr) for arr, _ in batch_entries
+                    ]
+                    st.session_state["batch_image_names"] = [
+                        fn for _, fn in batch_entries
+                    ]
+
+                    if st.button("Run Batch Denoising", key="sample_dataset_batch_run_btn"):
+                        imgs = st.session_state.get("batch_images") or []
+                        names = st.session_state.get("batch_image_names") or []
+                        if not imgs:
+                            st.error("No batch images in session.")
+                        else:
+                            with st.spinner(
+                                f"Batch denoising {len(imgs)} patch(es) with **{method}**…"
+                            ):
+                                device_str = (
+                                    "cuda" if torch.cuda.is_available() else "cpu"
+                                )
+                                opts = service_options_from_merged()
+                                batch_svc = SARDenoiseService(
+                                    device=device_str,
+                                    infer_backend=opts["infer_backend"],
+                                    onnx_path=opts["onnx_path"],
+                                )
+                                batch_kw = build_streamlit_denoise_kw(
+                                    with_direct_uncertainty=False
+                                )
+                                batch_results = []
+                                for img_arr, fname in zip(imgs, names):
+                                    try:
+                                        if np.iscomplexobj(img_arr):
+                                            raise ValueError(
+                                                "Complex-valued batch item — use magnitude pipeline elsewhere."
+                                            )
+                                        bout = batch_svc.denoise_numpy(
+                                            img_arr,
+                                            method,
+                                            **batch_kw,
+                                            include_blind_qa=False,
+                                        )
+                                        batch_results.append(
+                                            {
+                                                "name": fname,
+                                                "denoised": np.asarray(
+                                                    bout["denoised"],
+                                                    dtype=np.float32,
+                                                ),
+                                                "error": None,
+                                            }
+                                        )
+                                    except Exception as e:
+                                        batch_results.append(
+                                            {
+                                                "name": fname,
+                                                "denoised": None,
+                                                "error": str(e),
+                                            }
+                                        )
+                                st.session_state["batch_denoise_results"] = batch_results
+                            st.success(
+                                f"✅ Batch denoising finished ({len(imgs)} patch(es))."
+                            )
+
+                    sample_batch_results = st.session_state.get("batch_denoise_results")
+                    if sample_batch_results:
+                        st.caption(
+                            "Last batch run — denoised outputs (same order as batch)."
+                        )
+                        out_ncols = 3
+                        for row0 in range(0, len(sample_batch_results), out_ncols):
+                            out_row = st.columns(out_ncols)
+                            for j, out_col in enumerate(out_row):
+                                k = row0 + j
+                                if k < len(sample_batch_results):
+                                    item = sample_batch_results[k]
+                                    with out_col:
+                                        with st.container(
+                                            key=f"sample_batch_out_{row0}_{j}"
+                                        ):
+                                            if item.get("error"):
+                                                st.error(
+                                                    f"{item['name']}: {item['error']}"
+                                                )
+                                            elif item.get("denoised") is not None:
+                                                st.image(
+                                                    item["denoised"],
+                                                    caption=item["name"],
+                                                    use_container_width=True,
+                                                    clamp=True,
+                                                )
+    else:
+        st.error("SAMPLE dataset not found. Please run: python download_sample_dataset.py")
     
     # Display uploaded/generated image
     if uploaded_file is not None:
@@ -216,236 +1037,48 @@ with col1:
 
 with col2:
     st.subheader("🔧 Denoising Results")
-    
-    if st.button("🚀 Run Denoising", type="primary"):
+    run_col1, run_col2 = st.columns(2)
+    with run_col1:
+        run_single = st.button("🚀 Run Denoising", type="primary")
+    with run_col2:
+        run_all_methods = st.button("Run All Methods")
+
+    if run_single:
         if 'noisy_image' not in st.session_state:
             st.error("Please upload an image or generate a synthetic one first!")
         else:
             with st.spinner("Running denoising algorithm..."):
                 start_time = time.time()
                 
-                # Get input image
                 noisy_image = st.session_state['noisy_image']
-                
-                # Enhanced preprocessing for SAR images
-                st.info("🔧 Applying enhanced SAR preprocessing...")
-                
-                # Convert to float32 and handle complex values
-                noisy_image = noisy_image.astype(np.float32)
-                
-                # If complex-valued (SAR magnitude), take magnitude
+
                 if np.iscomplexobj(noisy_image):
-                    noisy_image = np.abs(noisy_image)
                     st.info("📡 Detected complex SAR data - extracting magnitude")
-                
-                # Normalize to [0, 1] with numerical stability
-                img_max = np.max(noisy_image)
-                if img_max > 0:
-                    noisy_image = noisy_image / (img_max + 1e-8)
-                else:
-                    noisy_image = np.zeros_like(noisy_image)
-                
-                st.success(f"✅ Preprocessed: range=[{noisy_image.min():.4f}, {noisy_image.max():.4f}]")
-                
-                # Load model
-                device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-                
-                if method == "ADMM-PnP-DL":
-                    # Try to load improved trained model first, then fallback to simple
-                    model_path = f"checkpoints_improved/best_model.pth"
-                    denoiser = None
-                    
-                    if os.path.exists(model_path):
-                        try:
-                            checkpoint = torch.load(model_path, map_location=device)
-                            # Detect model type from checkpoint keys
-                            state_dict_keys = list(checkpoint['model_state_dict'].keys())
-                            if any('inc.double_conv' in key for key in state_dict_keys):
-                                # This is a U-Net model
-                                actual_model_type = 'unet'
-                                st.info("🔍 Detected U-Net model in checkpoint")
-                            elif any('dncnn' in key for key in state_dict_keys):
-                                # This is a DnCNN model
-                                actual_model_type = 'dncnn'
-                                st.info("🔍 Detected DnCNN model in checkpoint")
-                            else:
-                                # Default to the selected model type
-                                actual_model_type = model_type.lower().replace('-', '')
-                            
-                            denoiser = create_model(actual_model_type, n_channels=1, noise_conditioning=False)
-                            denoiser.load_state_dict(checkpoint['model_state_dict'])
-                            st.success("🚀 Loaded IMPROVED trained model (30+ dB PSNR)")
-                        except Exception as e:
-                            st.error(f"❌ Failed to load improved model: {str(e)}")
-                            denoiser = None
-                    
-                    # Fallback to simple model if improved model failed
-                    if denoiser is None:
-                        model_path = f"checkpoints_simple/best_model.pth"
-                        if os.path.exists(model_path):
-                            try:
-                                checkpoint = torch.load(model_path, map_location=device)
-                                # Detect model type from checkpoint keys
-                                state_dict_keys = list(checkpoint['model_state_dict'].keys())
-                                if any('inc.double_conv' in key for key in state_dict_keys):
-                                    actual_model_type = 'unet'
-                                elif any('dncnn' in key for key in state_dict_keys):
-                                    actual_model_type = 'dncnn'
-                                else:
-                                    actual_model_type = model_type.lower().replace('-', '')
-                                
-                                denoiser = create_model(actual_model_type, n_channels=1, noise_conditioning=False)
-                                denoiser.load_state_dict(checkpoint['model_state_dict'])
-                                st.success("✅ Loaded basic trained model")
-                            except Exception as e:
-                                st.error(f"❌ Failed to load basic model: {str(e)}")
-                                # Use the selected model type with random weights
-                                model_type_clean = model_type.lower().replace('-', '')
-                                denoiser = create_model(model_type_clean, n_channels=1, noise_conditioning=False)
-                                st.warning("⚠️ Using random weights (failed to load trained model)")
-                        else:
-                            # Use the selected model type with random weights
-                            model_type_clean = model_type.lower().replace('-', '')
-                            denoiser = create_model(model_type_clean, n_channels=1, noise_conditioning=False)
-                            st.warning("⚠️ Using random weights (no trained model found)")
-                    
-                    # Check if denoising is disabled
-                    if disable_denoising:
-                        st.info("🚫 Denoising disabled - returning original image")
-                        denoised_image = noisy_image.copy()
-                        energies = [0]
-                        residuals = [0]
-                    else:
-                        # FIXED ADMM-PnP algorithm
-                        st.info("🔧 Using FIXED ADMM-PnP algorithm")
-                        
-                        try:
-                            # Create ADMM-PnP instance with FIXED algorithm
-                            admm = ADMMPnP(
-                                denoiser, 
-                                device=device,
-                                max_iter=max_iter,
-                                rho_init=rho_init,
-                                alpha=alpha,
-                                theta=theta,
-                                use_log_transform=use_log_transform
-                            )
-                            
-                            # Run FIXED denoising
-                            result = admm.denoise(noisy_image)
-                            denoised_image = result['denoised']
-                            energies = result['energies']
-                            residuals = result['residuals']
-                            
-                            st.success("✅ FIXED ADMM-PnP denoising completed successfully")
-                            
-                        except Exception as e:
-                            st.error(f"❌ FIXED ADMM-PnP failed: {str(e)}")
-                            st.error("🚨 Returning original image as fallback")
-                            denoised_image = noisy_image.copy()
-                            energies = [0]
-                            residuals = [0]
-                    
-                    # DIAGNOSTIC: Check output quality
-                    st.info("🔍 Running diagnostic checks...")
-                    
-                    # Check if output is reasonable
-                    if denoised_image.shape != noisy_image.shape:
-                        st.error(f"🚨 SHAPE MISMATCH: Input {noisy_image.shape} vs Output {denoised_image.shape}")
-                        st.error("🚨 This indicates a fundamental algorithm failure!")
-                        denoised_image = noisy_image.copy()  # Fallback to original
-                    
-                    # Check for NaN or Inf values
-                    if np.any(np.isnan(denoised_image)) or np.any(np.isinf(denoised_image)):
-                        st.error("🚨 OUTPUT CONTAINS NaN OR INF VALUES!")
-                        denoised_image = noisy_image.copy()  # Fallback to original
-                    
-                    # Check for completely flat output
-                    if np.std(denoised_image) < 1e-6:
-                        st.error("🚨 OUTPUT IS COMPLETELY FLAT - Algorithm failed!")
-                        denoised_image = noisy_image.copy()  # Fallback to original
-                    
-                    # FIXED ADMM-PnP STATUS REPORT
-                    st.success("✅ FIXED ADMM-PnP ALGORITHM ACTIVE")
-                    st.success("✅ Fixed tensor shape mismatches and FFT operations")
-                    st.success("✅ Fixed PSF creation and denoiser integration")
-                    st.info("ℹ️ Using properly implemented ADMM-PnP with deep learning denoiser")
-                    
-                    # Enhanced postprocessing for better results
-                    st.info("🔧 Applying enhanced postprocessing...")
-                    
-                    # Ensure proper tensor handling and conversion
-                    if hasattr(denoised_image, 'detach'):
-                        denoised_image = denoised_image.detach().cpu().numpy()
-                    
-                    # Fix black output issue with proper scaling
-                    denoised_min = denoised_image.min()
-                    denoised_max = denoised_image.max()
-                    
-                    if denoised_max > denoised_min:
-                        denoised_image = (denoised_image - denoised_min) / (denoised_max - denoised_min + 1e-8)
-                    else:
-                        denoised_image = np.zeros_like(denoised_image)
-                    
-                    # Clip to [0, 1] range
-                    denoised_image = np.clip(denoised_image, 0, 1)
-                    
-                    # Quality Enhancement Mode: Minimal refinement only
-                    if quality_enhancement:
-                        st.info("✨ Quality Enhancement Mode: Applying minimal refinement...")
-                        
-                        # Only apply very light non-local means if needed
-                        try:
-                            import cv2
-                            denoised_uint8 = (denoised_image * 255).astype(np.uint8)
-                            # Very conservative parameters to avoid over-smoothing
-                            denoised_refined = cv2.fastNlMeansDenoising(denoised_uint8, None, 2, 7, 21) / 255.0
-                            denoised_image = denoised_refined
-                            st.success("✅ Applied minimal non-local means refinement")
-                        except Exception as e:
-                            st.warning(f"⚠️ Quality enhancement failed: {str(e)} - using original result")
-                    else:
-                        st.info("🚫 Quality Enhancement Mode disabled - preserving original sharpness")
-                    
-                    st.success(f"✅ Postprocessed: range=[{denoised_image.min():.4f}, {denoised_image.max():.4f}]")
-                    
-                elif method == "Direct Denoising":
-                    # Load denoiser
-                    denoiser = create_model(model_type.lower(), n_channels=1, noise_conditioning=True)
-                    
-                    # Try to load trained model
-                    model_path = f"checkpoints_simple/best_model.pth"
-                    if os.path.exists(model_path):
-                        checkpoint = torch.load(model_path, map_location=device)
-                        denoiser.load_state_dict(checkpoint['model_state_dict'])
-                        st.success("✅ Loaded trained model")
-                    else:
-                        st.warning("⚠️ Using random weights (no trained model found)")
-                    
-                    # Direct denoising
-                    denoiser.eval()
-                    with torch.no_grad():
-                        input_tensor = torch.from_numpy(noisy_image).float().unsqueeze(0).unsqueeze(0).to(device)
-                        noise_level = torch.tensor(speckle_factor, device=device)
-                        
-                        if hasattr(denoiser, 'noise_conditioning') and denoiser.noise_conditioning:
-                            denoised_tensor = denoiser(input_tensor, noise_level)
-                        else:
-                            denoised_tensor = denoiser(input_tensor)
-                        
-                        denoised_image = denoised_tensor.squeeze().cpu().numpy()
-                    
-                    energies = [0]  # No energy for direct denoising
-                    residuals = [0]
-                    
-                elif method == "TV Denoising":
-                    # TV denoising
-                    tv_denoiser = TVDenoiser(device=device)
-                    denoised_tensor = tv_denoiser.tv_denoise(torch.from_numpy(noisy_image).float().to(device))
-                    denoised_image = denoised_tensor.cpu().numpy()
-                    energies = [0]  # No energy for TV denoising
-                    residuals = [0]
-                
+
+                device_str = "cuda" if torch.cuda.is_available() else "cpu"
+                opts = service_options_from_merged()
+                svc = SARDenoiseService(
+                    device=device_str,
+                    infer_backend=opts["infer_backend"],
+                    onnx_path=opts["onnx_path"],
+                )
+                denoise_kw = build_streamlit_denoise_kw(with_direct_uncertainty=True)
+
+                out = svc.denoise_numpy(
+                    noisy_image,
+                    method,
+                    **denoise_kw,
+                    include_blind_qa=include_blind_qa_sidebar,
+                )
+                replay_messages_streamlit(out["messages"], st)
+
+                denoised_image = out["denoised"]
+                energies = out["energies"]
+                residuals = out["residuals"]
+                _meta_out = out.get("meta") or {}
+                st.session_state["last_blind_qa"] = _meta_out.get("blind_qa")
+                st.session_state["last_blind_qa_error"] = _meta_out.get("blind_qa_error")
+
                 end_time = time.time()
                 processing_time = end_time - start_time
                 
@@ -454,15 +1087,76 @@ with col2:
                 st.session_state['processing_time'] = processing_time
                 st.session_state['energies'] = energies
                 st.session_state['residuals'] = residuals
-    
+                u = out.get("uncertainty")
+                if u is not None:
+                    st.session_state['uncertainty_u8'] = uncertainty_to_vis_u8(u)
+                    st.session_state['uncertainty_meta'] = {
+                        k: out.get("meta", {}).get(k)
+                        for k in ("uncertainty_mean", "uncertainty_max", "uncertainty_tta_passes")
+                        if out.get("meta", {}).get(k) is not None
+                    }
+                else:
+                    st.session_state.pop('uncertainty_u8', None)
+                    st.session_state.pop('uncertainty_meta', None)
+
+    if run_all_methods:
+        if "noisy_image" not in st.session_state:
+            st.error("Please upload an image or generate a synthetic one first!")
+        else:
+            with st.spinner("Running TV, Direct, and ADMM-PnP-DL…"):
+                noisy_image = st.session_state["noisy_image"]
+                if np.iscomplexobj(noisy_image):
+                    st.info("📡 Detected complex SAR data - extracting magnitude")
+
+                device_str = "cuda" if torch.cuda.is_available() else "cpu"
+                opts = service_options_from_merged()
+                svc = SARDenoiseService(
+                    device=device_str,
+                    infer_backend=opts["infer_backend"],
+                    onnx_path=opts["onnx_path"],
+                )
+                kw = build_streamlit_denoise_kw(with_direct_uncertainty=False)
+                raw_outputs = []
+                seconds_list = []
+                for mname in MULTI_METHOD_ORDER:
+                    t0 = time.perf_counter()
+                    out_m = svc.denoise_numpy(noisy_image, mname, **kw)
+                    seconds_list.append(time.perf_counter() - t0)
+                    raw_outputs.append(np.asarray(out_m["denoised"], dtype=np.float32))
+                display_arrays = normalize_images_shared_range(raw_outputs)
+                st.session_state["multi_method_comparison"] = [
+                    {"name": n, "display": d, "seconds": s}
+                    for n, d, s in zip(MULTI_METHOD_ORDER, display_arrays, seconds_list)
+                ]
+            st.success("✅ Multi-method run complete — see section below.")
+
     # Display results
     if 'denoised_image' in st.session_state:
         denoised_img = st.session_state['denoised_image']
-        st.image(denoised_img, caption="Denoised Image", use_container_width=True, clamp=True)
+        if 'uncertainty_u8' in st.session_state:
+            uc1, uc2 = st.columns(2)
+            with uc1:
+                st.image(denoised_img, caption="Denoised (TTA mean)", use_container_width=True, clamp=True)
+            with uc2:
+                st.image(
+                    st.session_state['uncertainty_u8'],
+                    caption="Uncertainty (TTA std, brighter = more spread)",
+                    use_container_width=True,
+                )
+            um = st.session_state.get('uncertainty_meta') or {}
+            if um:
+                st.caption(
+                    " · ".join(f"{k}: {float(v):.6g}" if isinstance(v, (int, float)) else f"{k}: {v}" for k, v in um.items())
+                )
+        else:
+            st.image(denoised_img, caption="Denoised Image", use_container_width=True, clamp=True)
         
-        # Calculate metrics if clean image is available
-        if 'clean_image' in st.session_state and st.session_state['image_source'] == 'synthetic':
-            clean_img = st.session_state['clean_image']
+        # Calculate metrics when a clean reference exists (synthetic or SAMPLE dataset)
+        if (
+            "clean_image" in st.session_state
+            and st.session_state["clean_image"] is not None
+        ):
+            clean_img = st.session_state["clean_image"]
             metrics = calculate_metrics(clean_img, denoised_img)
             
             st.subheader("📊 Performance Metrics")
@@ -478,6 +1172,116 @@ with col2:
         # Processing time
         if 'processing_time' in st.session_state:
             st.metric("Processing Time", f"{st.session_state['processing_time']:.2f} seconds")
+
+        if st.session_state.get("last_blind_qa_error"):
+            st.warning(
+                f"Blind QA failed: {st.session_state['last_blind_qa_error']}"
+            )
+        _bq = st.session_state.get("last_blind_qa")
+        if _bq:
+            st.subheader("Blind QA (no reference)")
+            st.caption(
+                "Indicative only — scene-dependent; not a substitute for paired metrics."
+            )
+            _m1, _m2, _m3, _m4, _m5 = st.columns(5)
+            with _m1:
+                st.metric("ENL homo. median", f"{float(_bq['enl_homogeneous_median']):.2f}")
+            with _m2:
+                st.metric("Edge pres. vs input", f"{float(_bq['edge_preservation_vs_input']):.3f}")
+            with _m3:
+                st.metric("Variance", f"{float(_bq['variance']):.5f}")
+            with _m4:
+                st.metric("Std dev", f"{float(_bq['std']):.4f}")
+            with _m5:
+                st.metric("Var(log I)", f"{float(_bq['variance_log']):.5f}")
+            with st.expander("Raw blind_qa JSON"):
+                st.json(_bq)
+
+# Multi-method comparison (TV / Direct / ADMM in one run, shared display scaling)
+if st.session_state.get("multi_method_comparison"):
+    st.markdown("---")
+    st.subheader("Multi-method comparison")
+    st.caption(
+        "One run with **TV**, **Direct**, and **ADMM-PnP-DL** using the same sidebar settings. "
+        "Intensity uses a **shared min–max** across all three outputs for a fair visual comparison."
+    )
+    mc = st.session_state["multi_method_comparison"]
+    mcol1, mcol2, mcol3 = st.columns(3)
+    for col, entry in zip((mcol1, mcol2, mcol3), mc):
+        with col:
+            st.image(
+                entry["display"],
+                caption=entry["name"],
+                use_container_width=True,
+                clamp=True,
+            )
+            st.metric("Inference time", f"{entry['seconds']:.3f} s")
+
+# Comparison Dashboard — interactive blend, absolute difference, discrete view toggles
+if "denoised_image" in st.session_state and "noisy_image" in st.session_state:
+    st.markdown("---")
+    st.subheader("Comparison Dashboard")
+    st.caption(
+        "Inspect noisy vs denoised without re-running inference. "
+        "Blend uses **α×denoised + (1−α)×noisy**; difference map uses |noisy−denoised| (display-normalized)."
+    )
+    noisy_cd = np.asarray(st.session_state["noisy_image"], dtype=np.float32)
+    den_cd = np.asarray(st.session_state["denoised_image"], dtype=np.float32)
+    if noisy_cd.shape != den_cd.shape:
+        st.warning("Input and denoised shapes differ; comparison dashboard skipped.")
+    else:
+        view_mode = st.radio(
+            "View",
+            (
+                "Interactive blend (slider)",
+                "Original (noisy)",
+                "Denoised",
+                "Absolute difference",
+            ),
+            horizontal=True,
+            key="comparison_dashboard_view",
+        )
+        if view_mode == "Interactive blend (slider)":
+            alpha_blend = st.slider(
+                "Opacity on denoised (α): 0 = full noisy, 1 = full denoised",
+                min_value=0.0,
+                max_value=1.0,
+                value=0.5,
+                step=0.01,
+                key="comparison_dashboard_alpha",
+            )
+            blended = comparison_blend_noisy_denoised(noisy_cd, den_cd, alpha_blend)
+            st.image(
+                blended,
+                caption=(
+                    f"Blend: {(1.0 - alpha_blend) * 100:.0f}% noisy + {alpha_blend * 100:.0f}% denoised "
+                    f"(α={alpha_blend:.2f})"
+                ),
+                use_container_width=True,
+                clamp=True,
+            )
+        elif view_mode == "Original (noisy)":
+            st.image(
+                noisy_cd,
+                caption="Original (noisy) input",
+                use_container_width=True,
+                clamp=True,
+            )
+        elif view_mode == "Denoised":
+            st.image(
+                den_cd,
+                caption="Denoised output",
+                use_container_width=True,
+                clamp=True,
+            )
+        else:
+            diff_vis = comparison_abs_diff_map(noisy_cd, den_cd)
+            st.image(
+                diff_vis,
+                caption="Absolute difference |noisy − denoised| (99th pct. stretch)",
+                use_container_width=True,
+                clamp=True,
+            )
 
 # Bottom section for detailed results
 if 'denoised_image' in st.session_state and 'energies' in st.session_state:
@@ -513,17 +1317,38 @@ if 'denoised_image' in st.session_state and 'noisy_image' in st.session_state:
     st.markdown("---")
     st.subheader("🔄 Image Comparison")
     
-    col1, col2, col3 = st.columns(3)
+    n_compare_cols = 4 if 'uncertainty_u8' in st.session_state else 3
+    cols = st.columns(n_compare_cols)
     
-    with col1:
+    with cols[0]:
         st.image(st.session_state['noisy_image'], caption="Noisy SAR Input", use_container_width=True, clamp=True)
     
-    with col2:
-        st.image(st.session_state['denoised_image'], caption="Denoised ADMM-PnP Output", use_container_width=True, clamp=True)
+    with cols[1]:
+        cap = f"Denoised ({method})"
+        st.image(st.session_state['denoised_image'], caption=cap, use_container_width=True, clamp=True)
+
+    if 'uncertainty_u8' in st.session_state:
+        with cols[2]:
+            st.image(
+                st.session_state['uncertainty_u8'],
+                caption="Uncertainty (TTA)",
+                use_container_width=True,
+            )
+        gt_col = cols[3]
+    else:
+        gt_col = cols[2]
     
-    with col3:
-        if 'clean_image' in st.session_state and st.session_state['image_source'] == 'synthetic':
-            st.image(st.session_state['clean_image'], caption="Ground Truth", use_container_width=True, clamp=True)
+    with gt_col:
+        if (
+            "clean_image" in st.session_state
+            and st.session_state["clean_image"] is not None
+        ):
+            st.image(
+                st.session_state["clean_image"],
+                caption="Ground Truth",
+                use_container_width=True,
+                clamp=True,
+            )
         else:
             st.info("No ground truth available for uploaded images")
     
@@ -542,6 +1367,78 @@ if 'denoised_image' in st.session_state and 'noisy_image' in st.session_state:
         with col3:
             improvement = st.session_state['denoised_image'].std() / (st.session_state['noisy_image'].std() + 1e-8)
             st.metric("Noise Reduction", f"{improvement:.2f}x")
+
+# Async job history — read-only view of data/jobs (FastAPI + Redis/RQ)
+st.markdown("---")
+st.subheader("Async job history")
+st.caption(
+    f"Read-only listing of **`{job_storage.jobs_root()}`** "
+    "(from **`POST /v1/jobs`**). Set **`SAR_JOBS_DIR`** to use a different root."
+)
+_root, _job_entries = load_job_history_entries(100)
+if not _root.is_dir():
+    st.info(
+        "No jobs directory on disk yet. Enable the queue (**`SAR_USE_QUEUE=1`**, **`REDIS_URL`**) "
+        "and submit jobs via the HTTP API to populate this folder."
+    )
+elif not _job_entries:
+    st.info("No job folders containing **meta.json** were found.")
+else:
+    st.metric("Jobs shown", len(_job_entries))
+    for _ent in _job_entries:
+        _jid = _ent["job_id"]
+        _method = _ent["meta"].get("method", "—")
+        _exp_label = f"`{_jid[:8]}…` · **{_ent['status']}** · {_method}"
+        with st.expander(_exp_label, expanded=False):
+            st.caption(f"Folder mtime: {datetime.fromtimestamp(_ent['mtime'])}")
+            if _ent.get("error"):
+                st.error(str(_ent["error"])[:4000])
+            st.markdown("**meta.json**")
+            st.json(_ent["meta"])
+            _jp = _ent["path"]
+            _dc1, _dc2, _dc3, _dc4 = st.columns(4)
+            with _dc1:
+                _op = _jp / "output.png"
+                if _op.is_file():
+                    st.download_button(
+                        "Download output.png",
+                        data=_op.read_bytes(),
+                        file_name=f"{_jid}_output.png",
+                        mime="image/png",
+                        key=f"job_hist_out_{_jid}",
+                    )
+                else:
+                    st.caption("—")
+            with _dc2:
+                _mf = _jp / "meta.json"
+                if _mf.is_file():
+                    st.download_button(
+                        "Download meta.json",
+                        data=_mf.read_bytes(),
+                        file_name=f"{_jid}_meta.json",
+                        mime="application/json",
+                        key=f"job_hist_meta_{_jid}",
+                    )
+            with _dc3:
+                _sf = _jp / "status.json"
+                if _sf.is_file():
+                    st.download_button(
+                        "Download status.json",
+                        data=_sf.read_bytes(),
+                        file_name=f"{_jid}_status.json",
+                        mime="application/json",
+                        key=f"job_hist_stat_{_jid}",
+                    )
+            with _dc4:
+                _up = _jp / "uncertainty.png"
+                if _up.is_file():
+                    st.download_button(
+                        "Download uncertainty.png",
+                        data=_up.read_bytes(),
+                        file_name=f"{_jid}_uncertainty.png",
+                        mime="image/png",
+                        key=f"job_hist_unc_{_jid}",
+                    )
 
 # Footer
 st.markdown("---")
@@ -590,5 +1487,5 @@ def generate_synthetic_sar_image(size):
 
 if __name__ == "__main__":
     # This will be run when the script is executed directly
-    # For Streamlit, use: streamlit run app.py
+    # For Streamlit, use: streamlit run demo/streamlit_app.py
     pass

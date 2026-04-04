@@ -141,7 +141,7 @@ else:
 ### **File Structure**
 ```
 demo/
-├── app.py                    # Main Streamlit app (updated)
+├── streamlit_app.py          # Main Streamlit app (updated)
 ├── smart_display.py          # Smart display function
 └── test_smart_display.py     # Test script
 ```
