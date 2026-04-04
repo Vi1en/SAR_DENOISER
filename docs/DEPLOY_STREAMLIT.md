@@ -6,16 +6,16 @@
 
 - Code pushed to GitHub (`main`).
 - Main file: **`demo/streamlit_app.py`**.
-- **`runtime.txt`**: pins **Python 3.11** so dependency pins (NumPy &lt; 2, etc.) resolve like local CI — Cloud otherwise defaults to **3.13** and may pull incompatible wheels.
-- Dependencies: **`requirements.txt`** is slim (no **rasterio**, no FastAPI/Redis/RQ). **`PyYAML`** is listed explicitly (provides `import yaml`).
-- **`packages.txt`**: **one apt package name per line only** — **no comments** (Streamlit passes each line to `apt-get install`).
+- **Python 3.11:** set it in **Advanced settings** when you deploy. [Streamlit’s docs](https://docs.streamlit.io/deploy/streamlit-community-cloud/manage-your-app/upgrade-python) say the runtime cannot be changed after deploy without **delete + redeploy**; **`runtime.txt` in the repo is not guaranteed to be read by Cloud** (it is still useful for other hosts).
+- Dependencies: **`requirements.txt`** is slim (no **rasterio**, no FastAPI/Redis/RQ). **`PyYAML`** is listed explicitly (provides `import yaml`). The app **lazy-imports** YAML so startup does not crash if PyYAML is missing (YAML config files are then skipped; env vars still work).
+- **No `packages.txt`:** we removed it because mixed Debian sources on Cloud broke `apt` (e.g. `libglib2.0-0`). **`opencv-python-headless`** wheels usually do not need extra system packages on Cloud.
 
 ## Steps
 
 1. Open [share.streamlit.io](https://share.streamlit.io) and sign in with GitHub.
 2. **New app** → pick **`Vi1en/SAR_DENOISER`** → branch **`main`**.
 3. **Main file path:** `demo/streamlit_app.py`.
-4. **Python version:** 3.11 (matches CI) if the UI offers a selector.
+4. **Advanced settings → Python:** choose **3.11** (matches CI and `requirements.txt` pins). Do not rely on Cloud defaulting to 3.11.
 5. Deploy.
 
 After deploy, Streamlit shows your public URL (e.g. `https://<app>.streamlit.app`). Add it to the main README under **Live demo**.
@@ -32,7 +32,7 @@ The app is written to degrade gracefully when improved checkpoints are missing.
 
 ## GeoTIFF / rasterio
 
-GeoTIFF uses **`rasterio`** (may need GDAL on some hosts). If install fails on Cloud, use **upload + PNG workflow** only, or simplify GeoTIFF imports later. **`packages.txt`** includes common system libs for OpenCV; add GDAL packages only if Streamlit build logs require it.
+GeoTIFF uses **`rasterio`** (may need GDAL on some hosts). If install fails on Cloud, use **upload + PNG workflow** only, or simplify GeoTIFF imports later. If you must add system libraries later, use a **`packages.txt`** with **one package name per line and no comments** (comment lines are passed to `apt-get` as bogus package names).
 
 ## Memory
 
@@ -45,7 +45,7 @@ GeoTIFF uses **`rasterio`** (may need GDAL on some hosts). If install fails on C
 |--------|--------|
 | **Error installing requirements** | Almost always a heavy/compiled package. This repo uses a **slim** `requirements.txt` (no `rasterio`, no API stack). Pull latest `main` and **redeploy**. If it still fails, open **Manage app → Logs** and search for the first `ERROR` line from `pip`. |
 | `ModuleNotFoundError` | Redeploy after sync; for local full stack use `pip install -r requirements-full.txt`. |
-| OpenCV errors | Ensure `packages.txt` is present; redeploy. |
+| OpenCV errors | Rare on Cloud with `opencv-python-headless`. If `cv2` still fails, add a minimal **`packages.txt`** (one package per line, no `#` lines) per Streamlit docs and redeploy. |
 | Model not found | Expected without weights; use TV or host checkpoints. |
 | Upload too large | Raise `maxUploadSize` in `.streamlit/config.toml` (MB). |
 | Pip timeout (torch) | In Streamlit Cloud logs, if download times out, redeploy during off-peak or ask for a rebuild. |

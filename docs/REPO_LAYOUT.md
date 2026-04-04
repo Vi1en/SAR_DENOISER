@@ -11,8 +11,7 @@
 | **`presentations/`** | PowerPoint decks |
 | **`configs/`** | YAML training / eval configs |
 | **`.streamlit/`** | Streamlit Cloud / local UI config |
-| **`packages.txt`** | Apt deps for Streamlit Cloud (**one package per line, no comments**) |
-| **`runtime.txt`** | Streamlit Cloud Python version (`python-3.11`) |
+| **`runtime.txt`** | Suggested Python version for hosts that read it (`python-3.11`); **Streamlit Community Cloud** uses **Advanced settings** at deploy time |
 | **`docs/DEPLOY_STREAMLIT.md`** | Free hosting steps |
 
 ## Common commands (from repo root)

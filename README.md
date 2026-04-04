@@ -4,7 +4,7 @@
 
 **Repository layout:** runnable scripts live in **`scripts/`**, tests in **`tests/`**, shared figures in **`assets/images/`** — see [`docs/REPO_LAYOUT.md`](docs/REPO_LAYOUT.md).  
 **Dependencies:** **`requirements.txt`** = slim (Streamlit Cloud–friendly). **`requirements-full.txt`** = API + GeoTIFF + queue for local/Docker/CI (`requirements-dev.txt` includes it).  
-**Streamlit Cloud:** root **`runtime.txt`** pins Python **3.11**; **`packages.txt`** must list only apt package names (no `#` comment lines).
+**Streamlit Cloud:** choose **Python 3.11** under **Advanced settings** when deploying ([docs](https://docs.streamlit.io/deploy/streamlit-community-cloud/manage-your-app/upgrade-python)). Root **`runtime.txt`** is for other platforms; this repo does **not** ship **`packages.txt`** so Cloud skips `apt` (avoids broken mixed-Debian installs).
 
 ---
 
@@ -43,9 +43,9 @@
 1. Push this repository to GitHub (`Vi1en/SAR_DENOISER`).
 2. Open [share.streamlit.io](https://share.streamlit.io) → **New app**.
 3. Repo: **`Vi1en/SAR_DENOISER`**, branch **`main`**, main file **`demo/streamlit_app.py`**.
-4. Deploy. Copy the issued `*.streamlit.app` URL into the line above.
+4. **Advanced settings** → Python **3.11**, then deploy. Copy the issued `*.streamlit.app` URL into the line above.
 
-**Details:** [`docs/DEPLOY_STREAMLIT.md`](docs/DEPLOY_STREAMLIT.md) · **System packages:** `packages.txt` · **App config:** `.streamlit/config.toml`
+**Details:** [`docs/DEPLOY_STREAMLIT.md`](docs/DEPLOY_STREAMLIT.md) · **App config:** `.streamlit/config.toml`
 
 **Note:** Learned checkpoints (`*.pth`) are not committed (see `.gitignore`). The demo still runs (e.g. **TV** and uploads). To enable full DL on Cloud, host weights (Secrets URL, Release, or LFS) and point the sidebar checkpoint path if you add that flow.
 

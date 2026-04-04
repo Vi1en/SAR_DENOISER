@@ -14,11 +14,6 @@ import os
 from pathlib import Path
 from typing import Any
 
-try:
-    import yaml  # PyPI: PyYAML
-except ImportError:  # pragma: no cover - Streamlit Cloud / minimal envs
-    yaml = None  # type: ignore[assignment]
-
 
 def _repo_root() -> Path:
     return Path(__file__).resolve().parent.parent
@@ -34,7 +29,12 @@ def infer_config_path() -> Path:
 
 
 def _load_yaml_file(path: Path) -> dict[str, Any]:
-    if yaml is None or not path.is_file():
+    """Load YAML if PyYAML is installed; otherwise skip file (env vars still apply)."""
+    if not path.is_file():
+        return {}
+    try:
+        import yaml  # PyPI: PyYAML — lazy so import never fails at module load
+    except ImportError:  # pragma: no cover
         return {}
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))
     return raw if isinstance(raw, dict) else {}
