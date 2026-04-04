@@ -3,6 +3,8 @@
 #
 # No --extra-index-url here: `uv pip install` on Community Cloud breaks when the PyTorch
 # index is listed first (setuptools / transitive build deps). Torch wheels are on PyPI.
+setuptools>=70.0.0
+wheel
 streamlit>=1.28.0
 numpy>=1.26.4,<2.2.0
 scipy>=1.11.0,<1.16.0
@@ -15,6 +17,3 @@ PyYAML>=6.0
 scikit-image>=0.21.0,<0.26.0
 tqdm>=4.64.0
 packaging>=20.0,<26
-pandas>=1.5.0
-seaborn>=0.12.0
-plotly>=5.14.0

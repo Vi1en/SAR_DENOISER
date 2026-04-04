@@ -47,6 +47,8 @@
 
 **Details:** [`docs/DEPLOY_STREAMLIT.md`](docs/DEPLOY_STREAMLIT.md) · **App config:** `.streamlit/config.toml`
 
+**Streamlit troubleshooting:** If the app errors, in **Manage app** confirm the GitHub repo is **`Vi1en/SAR_DENOISER`** (or a fork whose **`main` is synced** with it). Logs that still show `infer_config.py:17 import yaml` or `packages.txt` are from **old code** — see [`docs/DEPLOY_STREAMLIT.md`](docs/DEPLOY_STREAMLIT.md).
+
 **Note:** Learned checkpoints (`*.pth`) are not committed (see `.gitignore`). The demo still runs (e.g. **TV** and uploads). To enable full DL on Cloud, host weights (Secrets URL, Release, or LFS) and point the sidebar checkpoint path if you add that flow.
 
 ---

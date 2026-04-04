@@ -41,6 +41,10 @@ GeoTIFF uses **`rasterio`** (may need GDAL on some hosts). If install fails on C
 
 ## Troubleshooting
 
+**`installer returned a non-zero exit code`:** That line is only a summary. The real reason is always **a few lines below** the latest `📦 Processing dependencies…` block (look for `uv`, `pip`, or `apt-get` stderr, e.g. `×`, `ERROR`, `E:`). Copy **that** chunk into an issue — not megabytes of older log from a previous day.
+
+**Forks:** If your Cloud app uses **your fork** of this repo, open the fork on GitHub → **Sync fork** so `main` matches **`Vi1en/SAR_DENOISER`**. An unsynced fork still runs old `infer_config` / `packages.txt` / old `requirements.txt`.
+
 **Logs look “stuck” on old errors:** Scroll to the **latest** timestamps after **Reboot**. If the traceback still shows `infer_config.py` **line 17** as `import yaml`, Cloud is not on current `main` (today that import is **lazy**, inside `_load_yaml_file`, not at module level). Confirm the app uses repo **`Vi1en/SAR_DENOISER`**, branch **`main`**, and that **`packages.txt`** is gone (it was removed on purpose). Set **Python 3.11** under **Advanced settings** so `numpy<2` installs from wheels instead of building on Python 3.13.
 
 **`ModuleNotFoundError: yaml`:** `demo/streamlit_app.py` calls `st.set_page_config` first, then bootstraps PyYAML (up to two `pip install` attempts) **before** importing `api.infer_config`. On current `main`, `infer_config` only imports `yaml` inside `_load_yaml_file`. If your traceback still shows **`streamlit_app.py` line ~32** at `set_page_config` or **`infer_config.py` line 17** as `import yaml`, the app is **not** running this revision — confirm GitHub **`Vi1en/SAR_DENOISER` `main`** and reboot. **Only root `requirements.txt`** is used for deps (no `demo/requirements.txt`).
