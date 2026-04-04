@@ -6,8 +6,9 @@
 
 - Code pushed to GitHub (`main`).
 - Main file: **`demo/streamlit_app.py`**.
-- Dependencies: root **`requirements.txt`** is a **slim** set (no **rasterio**/GDAL, no FastAPI/Redis/RQ) so installs succeed on free tier. GeoTIFF upload in the app shows a clear message if `rasterio` is missing.
-- Optional: **`packages.txt`** for OpenCV-related system libs on Linux.
+- **`runtime.txt`**: pins **Python 3.11** so dependency pins (NumPy &lt; 2, etc.) resolve like local CI — Cloud otherwise defaults to **3.13** and may pull incompatible wheels.
+- Dependencies: **`requirements.txt`** is slim (no **rasterio**, no FastAPI/Redis/RQ). **`PyYAML`** is listed explicitly (provides `import yaml`).
+- **`packages.txt`**: **one apt package name per line only** — **no comments** (Streamlit passes each line to `apt-get install`).
 
 ## Steps
 

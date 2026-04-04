@@ -1,6 +1,4 @@
-# -----------------------------------------------------------------------------
-# Local development, Docker API image, and CI (full stack)
-# -----------------------------------------------------------------------------
+# Full stack: starts from slim requirements.txt, then adds API / GeoTIFF / queue.
 -r requirements.txt
 rasterio>=1.3.0
 fastapi>=0.109.0

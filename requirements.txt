@@ -1,11 +1,3 @@
-# -----------------------------------------------------------------------------
-# Streamlit Community Cloud & minimal local demo
-# -----------------------------------------------------------------------------
-# This file is intentionally slim: no rasterio (GDAL), no FastAPI/Redis/RQ.
-# Those often break or slow down free-tier cloud builds.
-#
-# Full stack (API, GeoTIFF, queue):  pip install -r requirements-full.txt
-# -----------------------------------------------------------------------------
 --extra-index-url https://download.pytorch.org/whl/cpu
 torch>=1.12.0
 torchvision>=0.13.0
@@ -21,6 +13,6 @@ packaging>=20.0,<25
 pandas>=1.4.0
 seaborn>=0.11.0
 plotly>=5.0.0
-pyyaml>=6.0
+PyYAML>=6.0
 onnx>=1.15.0
 onnxruntime>=1.16.0

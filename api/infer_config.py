@@ -14,7 +14,10 @@ import os
 from pathlib import Path
 from typing import Any
 
-import yaml
+try:
+    import yaml  # PyPI: PyYAML
+except ImportError:  # pragma: no cover - Streamlit Cloud / minimal envs
+    yaml = None  # type: ignore[assignment]
 
 
 def _repo_root() -> Path:
@@ -31,7 +34,7 @@ def infer_config_path() -> Path:
 
 
 def _load_yaml_file(path: Path) -> dict[str, Any]:
-    if not path.is_file():
+    if yaml is None or not path.is_file():
         return {}
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))
     return raw if isinstance(raw, dict) else {}

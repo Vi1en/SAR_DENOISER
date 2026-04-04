@@ -3,7 +3,8 @@
 **A Deep Learning Approach to Synthetic Aperture Radar Image Denoising**
 
 **Repository layout:** runnable scripts live in **`scripts/`**, tests in **`tests/`**, shared figures in **`assets/images/`** — see [`docs/REPO_LAYOUT.md`](docs/REPO_LAYOUT.md).  
-**Dependencies:** **`requirements.txt`** = slim (Streamlit Cloud–friendly). **`requirements-full.txt`** = API + GeoTIFF + queue for local/Docker/CI (`requirements-dev.txt` includes it).
+**Dependencies:** **`requirements.txt`** = slim (Streamlit Cloud–friendly). **`requirements-full.txt`** = API + GeoTIFF + queue for local/Docker/CI (`requirements-dev.txt` includes it).  
+**Streamlit Cloud:** root **`runtime.txt`** pins Python **3.11**; **`packages.txt`** must list only apt package names (no `#` comment lines).
 
 ---
 
