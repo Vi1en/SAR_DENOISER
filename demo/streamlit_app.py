@@ -35,26 +35,6 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 
-def _git_short_rev() -> str:
-    """Best-effort commit id so you can confirm Community Cloud pulled the right `main`."""
-    for key in ("GITHUB_SHA", "COMMIT_SHA", "SOURCE_VERSION"):
-        v = os.environ.get(key, "").strip()
-        if len(v) >= 7:
-            return v[:7]
-    try:
-        import subprocess
-
-        return subprocess.check_output(
-            ["git", "rev-parse", "--short", "HEAD"],
-            cwd=PROJECT_ROOT,
-            stderr=subprocess.DEVNULL,
-            text=True,
-            timeout=3,
-        ).strip()
-    except Exception:
-        return "unknown"
-
-
 def _ensure_pyyaml() -> None:
     """Ensure `import yaml` works (Cloud `uv` occasionally omits PyYAML from the env)."""
     for _ in range(2):
@@ -280,10 +260,6 @@ st.markdown("---")
 
 # Sidebar
 st.sidebar.title("Configuration")
-st.sidebar.caption(
-    f"Deployed git revision: **`{_git_short_rev()}`** — compare to [GitHub `main`](https://github.com/Vi1en/SAR_DENOISER/commits/main). "
-    "If logs still show `infer_config.py:17 import yaml` or `packages.txt`, that log is **old** or the app is **not** this repo."
-)
 
 # Model selection
 model_type = st.sidebar.selectbox(
