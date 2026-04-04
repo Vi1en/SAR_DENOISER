@@ -7,7 +7,7 @@
 - Code pushed to GitHub (`main`).
 - Main file: **`demo/streamlit_app.py`**.
 - **Python 3.11:** set it in **Advanced settings** when you deploy. [Streamlit’s docs](https://docs.streamlit.io/deploy/streamlit-community-cloud/manage-your-app/upgrade-python) say the runtime cannot be changed after deploy without **delete + redeploy**; **`runtime.txt` in the repo is not guaranteed to be read by Cloud** (it is still useful for other hosts).
-- Dependencies: **`requirements.txt`** is slim (no **rasterio**, no FastAPI/Redis/RQ). **`PyYAML`** is listed explicitly (provides `import yaml`). The app **lazy-imports** YAML so startup does not crash if PyYAML is missing (YAML config files are then skipped; env vars still work).
+- Dependencies: **`requirements.txt`** is slim (no **rasterio**, no FastAPI/Redis/RQ, **no ONNX** — those are in **`requirements-full.txt`**). **`PyYAML`** is listed explicitly. YAML is **lazy-imported** in code. **Do not** put `--extra-index-url` in `requirements.txt`: Streamlit’s **uv** step can fail resolving **`onnx` / `ml-dtypes` / `setuptools`** when the PyTorch index is listed first.
 - **No `packages.txt`:** we removed it because mixed Debian sources on Cloud broke `apt` (e.g. `libglib2.0-0`). **`opencv-python-headless`** wheels usually do not need extra system packages on Cloud.
 
 ## Steps

@@ -3,7 +3,7 @@
 **A Deep Learning Approach to Synthetic Aperture Radar Image Denoising**
 
 **Repository layout:** runnable scripts live in **`scripts/`**, tests in **`tests/`**, shared figures in **`assets/images/`** — see [`docs/REPO_LAYOUT.md`](docs/REPO_LAYOUT.md).  
-**Dependencies:** **`requirements.txt`** = slim (Streamlit Cloud–friendly). **`requirements-full.txt`** = API + GeoTIFF + queue for local/Docker/CI (`requirements-dev.txt` includes it).  
+**Dependencies:** **`requirements.txt`** = slim (Streamlit Cloud–friendly: PyPI-only torch line, no ONNX). **`requirements-full.txt`** = API + GeoTIFF + queue + ONNX for local/Docker/CI (`requirements-dev.txt` includes it).  
 **Streamlit Cloud:** choose **Python 3.11** under **Advanced settings** when deploying ([docs](https://docs.streamlit.io/deploy/streamlit-community-cloud/manage-your-app/upgrade-python)). Root **`runtime.txt`** is for other platforms; this repo does **not** ship **`packages.txt`** so Cloud skips `apt` (avoids broken mixed-Debian installs).
 
 ---
