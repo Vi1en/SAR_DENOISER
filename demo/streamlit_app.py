@@ -27,6 +27,24 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+
+def _ensure_pyyaml() -> None:
+    """Community Cloud sometimes omits PyYAML from the resolved env; install if missing."""
+    try:
+        import yaml  # noqa: F401
+    except ImportError:
+        import subprocess
+
+        subprocess.run(
+            [sys.executable, "-m", "pip", "install", "--no-input", "PyYAML>=6.0"],
+            check=False,
+            timeout=180,
+            capture_output=True,
+        )
+
+
+_ensure_pyyaml()
+
 from algos.evaluation import calculate_metrics, calculate_ssim
 from api import storage as job_storage
 from api.infer_config import get_merged, service_options_from_merged
