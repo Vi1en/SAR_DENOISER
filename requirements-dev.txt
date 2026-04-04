@@ -1,4 +1,4 @@
-# Development / CI (install after requirements.txt; use CPU PyTorch in CI via workflow).
--r requirements.txt
+# Development / CI: full stack + linters/tests (CI installs CPU torch first, then this file).
+-r requirements-full.txt
 ruff>=0.8.0
 pytest>=8.0.0

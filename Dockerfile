@@ -11,10 +11,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     SAR_DEVICE=cpu
 
-COPY requirements.txt .
-# One resolve: NumPy<2 and stack pins from requirements.txt, plus CPU wheels from PyTorch index.
+COPY requirements.txt requirements-full.txt ./
+# Full stack (FastAPI, rasterio, Redis clients) for the API image.
 RUN pip install --upgrade pip \
-    && pip install -r requirements.txt \
+    && pip install -r requirements-full.txt \
         --extra-index-url https://download.pytorch.org/whl/cpu
 
 COPY . .

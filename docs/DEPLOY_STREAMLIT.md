@@ -6,7 +6,8 @@
 
 - Code pushed to GitHub (`main`).
 - Main file: **`demo/streamlit_app.py`**.
-- Dependencies: root **`requirements.txt`** (+ optional **`packages.txt`** for system libs).
+- Dependencies: root **`requirements.txt`** is a **slim** set (no **rasterio**/GDAL, no FastAPI/Redis/RQ) so installs succeed on free tier. GeoTIFF upload in the app shows a clear message if `rasterio` is missing.
+- Optional: **`packages.txt`** for OpenCV-related system libs on Linux.
 
 ## Steps
 
@@ -41,7 +42,9 @@ GeoTIFF uses **`rasterio`** (may need GDAL on some hosts). If install fails on C
 
 | Issue | Action |
 |--------|--------|
-| `ModuleNotFoundError` | Confirm `requirements.txt` is complete; redeploy. |
+| **Error installing requirements** | Almost always a heavy/compiled package. This repo uses a **slim** `requirements.txt` (no `rasterio`, no API stack). Pull latest `main` and **redeploy**. If it still fails, open **Manage app → Logs** and search for the first `ERROR` line from `pip`. |
+| `ModuleNotFoundError` | Redeploy after sync; for local full stack use `pip install -r requirements-full.txt`. |
 | OpenCV errors | Ensure `packages.txt` is present; redeploy. |
 | Model not found | Expected without weights; use TV or host checkpoints. |
 | Upload too large | Raise `maxUploadSize` in `.streamlit/config.toml` (MB). |
+| Pip timeout (torch) | In Streamlit Cloud logs, if download times out, redeploy during off-peak or ask for a rebuild. |

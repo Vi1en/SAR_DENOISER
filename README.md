@@ -2,7 +2,8 @@
 
 **A Deep Learning Approach to Synthetic Aperture Radar Image Denoising**
 
-**Repository layout:** runnable scripts live in **`scripts/`**, tests in **`tests/`**, shared figures in **`assets/images/`** — see [`docs/REPO_LAYOUT.md`](docs/REPO_LAYOUT.md).
+**Repository layout:** runnable scripts live in **`scripts/`**, tests in **`tests/`**, shared figures in **`assets/images/`** — see [`docs/REPO_LAYOUT.md`](docs/REPO_LAYOUT.md).  
+**Dependencies:** **`requirements.txt`** = slim (Streamlit Cloud–friendly). **`requirements-full.txt`** = API + GeoTIFF + queue for local/Docker/CI (`requirements-dev.txt` includes it).
 
 ---
 
@@ -289,8 +290,8 @@ This iterative process converges to a high-quality denoised image.
 
 #### Phase 1: Setup & Data Preparation
 ```bash
-# 1. Install dependencies
-pip install -r requirements.txt
+# 1. Install dependencies (full local stack: API + GeoTIFF + queue)
+pip install -r requirements-full.txt
 
 # 2. Download SAMPLE SAR dataset
 python scripts/download_sample_dataset.py
@@ -336,7 +337,7 @@ streamlit run demo/streamlit_app.py
 
 #### GeoTIFF (optional, production-style I/O)
 
-Single-band, **georeferenced** GeoTIFFs only (`rasterio` is in `requirements.txt`). The CLI reads the raster in **windows** (default tile 512×512), denoises each tile, and writes a float32 GeoTIFF with the **same CRS and geotransform** as the input. **`overlap` must be 0** in this version (non-overlapping tiles; overlap blending is future work). **Nodata** pixels are left unchanged where possible.
+Single-band, **georeferenced** GeoTIFFs only (`rasterio` is in **`requirements-full.txt`**). The CLI reads the raster in **windows** (default tile 512×512), denoises each tile, and writes a float32 GeoTIFF with the **same CRS and geotransform** as the input. **`overlap` must be 0** in this version (non-overlapping tiles; overlap blending is future work). **Nodata** pixels are left unchanged where possible.
 
 **Normalization:** each tile is min–max scaled to `[0, 1]` before the model and rescaled afterward. This does **not** infer amplitude vs dB; align with how you trained the network.
 
@@ -582,7 +583,7 @@ pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
 
 **Install remaining dependencies:**
 ```bash
-pip install -r requirements.txt
+pip install -r requirements-full.txt
 ```
 
 #### Troubleshooting: NumPy / Matplotlib import error
@@ -594,10 +595,10 @@ If training fails with **`numpy.core.multiarray failed to import`**, **`ImportEr
 **Fix — reinstall the whole pinned stack in one go** (after installing PyTorch as in step 3):
 
 ```bash
-pip install -r requirements.txt --upgrade --force-reinstall
+pip install -r requirements-full.txt --upgrade --force-reinstall
 ```
 
-`requirements.txt` keeps **NumPy below 2**, **Matplotlib below 3.10**, **OpenCV headless below 4.13** (4.13+ requires NumPy 2), **Pillow below 12**, and **packaging below 25** so the resolver stays consistent.
+**`requirements.txt`** / **`requirements-full.txt`** keep **NumPy below 2**, **Matplotlib below 3.10**, **OpenCV headless below 4.13** (4.13+ requires NumPy 2), **Pillow below 12**, and **packaging below 25** so the resolver stays consistent.
 
 **Sanity check:**
 
@@ -607,9 +608,9 @@ python -c "import numpy, matplotlib; print('numpy', numpy.__version__, 'matplotl
 
 You should see **numpy** `1.26.x` (or another **1.x**) and **matplotlib** `3.9.x`.
 
-**About pip’s “dependency conflicts” line after install:** `requirements.txt` caps **SciPy below 1.14** so it stays compatible with **gensim** often preinstalled in **conda base** (`gensim 4.3.x` requires `scipy<1.14`). You may still see warnings for other unrelated packages (e.g. **aext-***, **s3fs** vs **fsspec**). If `python scripts/verify_system.py` runs, those are usually safe to ignore. A **dedicated conda/venv** for this repo avoids mixed conda/pip noise entirely.
+**About pip’s “dependency conflicts” line after install:** the requirement files cap **SciPy below 1.14** so it stays compatible with **gensim** often preinstalled in **conda base** (`gensim 4.3.x` requires `scipy<1.14`). You may still see warnings for other unrelated packages (e.g. **aext-***, **s3fs** vs **fsspec**). If `python scripts/verify_system.py` runs, those are usually safe to ignore. A **dedicated conda/venv** for this repo avoids mixed conda/pip noise entirely.
 
-**Alternative:** use a **fresh conda env** (see above), then install PyTorch and `pip install -r requirements.txt` so conda does not fight pip.
+**Alternative:** use a **fresh conda env** (see above), then install PyTorch and `pip install -r requirements-full.txt` so conda does not fight pip.
 
 #### Troubleshooting: `command not found: omit` (or other random words)
 
@@ -617,17 +618,17 @@ That usually means a **comment or sentence was split** across lines when you pas
 
 #### Troubleshooting: pip `ReadTimeoutError`, DNS, or flaky downloads
 
-If `pip install -r requirements.txt` fails with **`Read timed out`** on `files.pythonhosted.org` or **`nodename nor servname provided`**, try a longer timeout and retry on a stable network:
+If `pip install -r requirements-full.txt` fails with **`Read timed out`** on `files.pythonhosted.org` or **`nodename nor servname provided`**, try a longer timeout and retry on a stable network:
 
 ```bash
-pip install -r requirements.txt --default-timeout=120
+pip install -r requirements-full.txt --default-timeout=120
 ```
 
-If **rasterio** keeps failing over pip, install it from conda-forge once, then run `pip install -r requirements.txt` again so remaining pins resolve against what is already installed:
+If **rasterio** keeps failing over pip, install it from conda-forge once, then run `pip install -r requirements-full.txt` again so remaining pins resolve against what is already installed:
 
 ```bash
 conda install -c conda-forge rasterio
-pip install -r requirements.txt
+pip install -r requirements-full.txt
 ```
 
 #### 4. Verify Installation
@@ -918,7 +919,8 @@ FINAL_YEAR_PROJECT/
 │   ├── plot_*.py, download_sample_dataset.py, run_demo.py, …
 │   └── build_improvements_presentation.py
 │
-├── requirements.txt                  # Python dependencies
+├── requirements.txt                  # Slim deps (Streamlit Cloud default)
+├── requirements-full.txt             # + rasterio, FastAPI, Redis/RQ (local/Docker/CI)
 ├── CONTRIBUTING.md                    # PR checklist (tests, ruff, changelog)
 ├── PROJECT_REPORT.md                  # Detailed project report
 └── README.md                          # This file

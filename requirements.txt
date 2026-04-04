@@ -1,31 +1,26 @@
-# Core ML (CPU wheels work on Streamlit Cloud; use CUDA locally if needed)
+# -----------------------------------------------------------------------------
+# Streamlit Community Cloud & minimal local demo
+# -----------------------------------------------------------------------------
+# This file is intentionally slim: no rasterio (GDAL), no FastAPI/Redis/RQ.
+# Those often break or slow down free-tier cloud builds.
+#
+# Full stack (API, GeoTIFF, queue):  pip install -r requirements-full.txt
+# -----------------------------------------------------------------------------
+--extra-index-url https://download.pytorch.org/whl/cpu
 torch>=1.12.0
 torchvision>=0.13.0
-# Stack below targets NumPy 1.x: avoids conda/pip ABI clashes and opencv 4.13+ (requires NumPy 2).
 numpy>=1.21.0,<2.0
-# Cap below 1.14 so conda/base gensim 4.3.x (scipy<1.14) does not conflict with pip-upgraded scipy.
 scipy>=1.8.0,<1.14
 scikit-image>=0.19.0
-# OpenCV 4.13+ declares numpy>=2 — cap for compatibility with numpy<2
 opencv-python-headless>=4.6.0,<4.13
-# Matplotlib 3.10+ wheels often pull NumPy 2; stay on 3.9.x line with NumPy 1.26
 matplotlib>=3.5.0,<3.10
 streamlit>=1.20.0
 tqdm>=4.64.0
-# Streamlit 1.45.x expects pillow<12, packaging<25
 Pillow>=9.0.0,<12
 packaging>=20.0,<25
 pandas>=1.4.0
 seaborn>=0.11.0
 plotly>=5.0.0
 pyyaml>=6.0
-rasterio>=1.3.0
-fastapi>=0.109.0
-uvicorn[standard]>=0.27.0
-python-multipart>=0.0.6
-redis>=5.0.0
-rq>=1.16.0
-# Optional serving (Step 09): Direct denoising via ONNX Runtime; ADMM stays PyTorch
 onnx>=1.15.0
 onnxruntime>=1.16.0
-
