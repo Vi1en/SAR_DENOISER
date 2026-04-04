@@ -5,7 +5,7 @@
 | **`assets/images/`** | PNG figures (comparisons, demos, reports) — not raw datasets |
 | **`scripts/`** | Runnable tools: training, evaluation, plotting, GeoTIFF/ONNX helpers, presentation build |
 | **`tests/`** | `pytest` tests (including former root `test_*.py` files) |
-| **`api/`**, **`inference/`**, **`models/`**, **`trainers/`**, **`algos/`**, **`demo/`**, **`data/`**, **`evaluators/`**, **`workers/`** | Application and library code; **`demo/requirements.txt`** includes root **`requirements.txt`** for Streamlit Cloud (entrypoint-adjacent deps) |
+| **`api/`**, **`inference/`**, **`models/`**, **`trainers/`**, **`algos/`**, **`demo/`**, **`data/`**, **`evaluators/`**, **`workers/`** | Application and library code (Streamlit entrypoint: **`demo/streamlit_app.py`**; Cloud uses root **`requirements.txt`**) |
 | **`data/`** | Datasets, loaders (image patches stay next to their splits) |
 | **`results/`** | Evaluation outputs, run logs, baseline JSON |
 | **`presentations/`** | PowerPoint decks |

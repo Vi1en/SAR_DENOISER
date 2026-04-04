@@ -2,44 +2,55 @@
 Streamlit demo application for ADMM-PnP-DL SAR image denoising
 """
 import streamlit as st
-import numpy as np
-import matplotlib.pyplot as plt
-import cv2
-from PIL import Image
+
+# First Streamlit call must run before other heavy imports (Streamlit + Community Cloud).
+st.set_page_config(
+    page_title="ADMM-PnP-DL SAR Image Denoising",
+    page_icon="🛰️",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
 import csv
 import hashlib
 import io
 import os
 import random
 import re
+import sys
 import tempfile
 import time
 import zipfile
 from datetime import datetime
-
-# Import our modules
-import sys
 from pathlib import Path
 
-# Ensure project root is on sys.path so that 'models', 'algos', and 'data' can be imported
+import cv2
+import matplotlib.pyplot as plt
+import numpy as np
+from PIL import Image
+
+# Repo root on path before any `api` / `algos` imports.
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 
 def _ensure_pyyaml() -> None:
-    """Community Cloud sometimes omits PyYAML from the resolved env; install if missing."""
-    try:
-        import yaml  # noqa: F401
-    except ImportError:
-        import subprocess
+    """Ensure `import yaml` works (Cloud `uv` occasionally omits PyYAML from the env)."""
+    for _ in range(2):
+        try:
+            import yaml  # noqa: F401
 
-        subprocess.run(
-            [sys.executable, "-m", "pip", "install", "--no-input", "PyYAML>=6.0"],
-            check=False,
-            timeout=180,
-            capture_output=True,
-        )
+            return
+        except ImportError:
+            import subprocess
+
+            subprocess.run(
+                [sys.executable, "-m", "pip", "install", "--no-input", "PyYAML>=6.0"],
+                check=False,
+                timeout=180,
+                capture_output=True,
+            )
 
 
 _ensure_pyyaml()
@@ -211,14 +222,6 @@ def normalize_images_shared_range(images: list[np.ndarray]) -> list[np.ndarray]:
 # Order for multi-method run: TV → Direct → ADMM (matches typical classical → DL progression)
 MULTI_METHOD_ORDER = ("TV Denoising", "Direct Denoising", "ADMM-PnP-DL")
 
-
-# Page configuration
-st.set_page_config(
-    page_title="ADMM-PnP-DL SAR Image Denoising",
-    page_icon="🛰️",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
 
 # Custom CSS
 st.markdown("""

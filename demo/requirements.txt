@@ -1,3 +1,0 @@
-# Streamlit Community Cloud resolves dependencies from the entrypoint directory first,
-# then the repo root. This file ensures the Cloud app uses the same pins as root.
--r ../requirements.txt
