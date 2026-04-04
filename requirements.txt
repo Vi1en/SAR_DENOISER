@@ -1,6 +1,7 @@
 # PyTorch: install from PyPI only here so Streamlit Cloud’s uv resolver does not mix indexes
 # (extra-index-url + uv breaks builds of onnx/ml-dtypes/setuptools). CI/Docker install CPU
 # wheels explicitly where needed; see .github/workflows/ci.yml and Dockerfile.
+PyYAML>=6.0
 torch>=1.12.0
 torchvision>=0.13.0
 numpy>=1.21.0,<2.0
@@ -15,4 +16,3 @@ packaging>=20.0,<25
 pandas>=1.4.0
 seaborn>=0.11.0
 plotly>=5.0.0
-PyYAML>=6.0

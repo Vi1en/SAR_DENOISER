@@ -41,6 +41,8 @@ GeoTIFF uses **`rasterio`** (may need GDAL on some hosts). If install fails on C
 
 ## Troubleshooting
 
+**Logs look “stuck” on old errors:** Scroll to the **latest** timestamps after **Reboot**. If the traceback still shows `infer_config.py` **line 17** as `import yaml`, Cloud is not on current `main` (today that import is **lazy**, inside `_load_yaml_file`, not at module level). Confirm the app uses repo **`Vi1en/SAR_DENOISER`**, branch **`main`**, and that **`packages.txt`** is gone (it was removed on purpose). Set **Python 3.11** under **Advanced settings** so `numpy<2` installs from wheels instead of building on Python 3.13.
+
 | Issue | Action |
 |--------|--------|
 | **Error installing requirements** | Almost always a heavy/compiled package. This repo uses a **slim** `requirements.txt` (no `rasterio`, no API stack). Pull latest `main` and **redeploy**. If it still fails, open **Manage app → Logs** and search for the first `ERROR` line from `pip`. |
