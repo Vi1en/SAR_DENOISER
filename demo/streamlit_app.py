@@ -132,6 +132,16 @@ def _format_metric_float(x: float, *, nd: int = 4) -> str:
     return f"{float(x):.{nd}f}"
 
 
+def _markdown_metric_table(rows: list[tuple[str, str]]) -> None:
+    """Full-width table so long labels are not truncated like narrow ``st.metric`` tiles."""
+    lines = ["| Metric | Value |", "| :--- | :--- |"]
+    for k, v in rows:
+        k_esc = str(k).replace("|", "·")
+        v_esc = str(v).replace("|", "·")
+        lines.append(f"| {k_esc} | {v_esc} |")
+    st.markdown("\n".join(lines))
+
+
 def load_sample_noisy_patch_float01(noisy_dir: str, filename: str):
     """
     Load one noisy SAMPLE patch as float32 in [0, 1].
@@ -829,58 +839,69 @@ with col1:
                     return "—"
                 return f"{fv:.3f}"
 
-            gm1, gm2, gm3, gm4, gm5, gm6 = st.columns(6)
-            with gm1:
-                st.metric("ENL (input, global)", _fmt_enl(ein))
-            with gm2:
-                st.metric("ENL (denoised, global)", _fmt_enl(eout))
-            with gm3:
-                st.metric(
-                    "ENL homog. (denoised)",
-                    _format_metric_float(float(bq.get("enl_homogeneous_median", 0.0))),
-                )
-            with gm4:
-                st.metric(
-                    "Edge pres. vs input",
-                    _format_metric_float(float(bq.get("edge_preservation_vs_input", 0.0))),
-                )
-            with gm5:
-                st.metric(
-                    "Norm. RMSE (in vs out)",
-                    _format_metric_float(
-                        float(st.session_state.get("streamlit_geotiff_norm_rmse", 0.0))
+            st.markdown("##### Metric summary")
+            _markdown_metric_table(
+                [
+                    ("ENL (input, global)", _fmt_enl(ein)),
+                    ("ENL (denoised, global)", _fmt_enl(eout)),
+                    (
+                        "ENL homog. (denoised)",
+                        _format_metric_float(
+                            float(bq.get("enl_homogeneous_median", 0.0))
+                        ),
                     ),
-                )
-            with gm6:
-                st.metric(
-                    "σ denoised (norm.)",
-                    _format_metric_float(float(bq.get("std", 0.0))),
-                )
-
-            gs1, gs2, gs3 = st.columns(3)
-            with gs1:
-                st.metric(
-                    "PSNR vs input (dB)",
-                    _format_metric_float(
-                        float(st.session_state.get("streamlit_geotiff_psnr_vs_input", 0.0)),
-                        nd=2,
+                    (
+                        "Edge pres. vs input",
+                        _format_metric_float(
+                            float(bq.get("edge_preservation_vs_input", 0.0))
+                        ),
                     ),
-                    help="Higher → denoised closer to observed input (less change).",
-                )
-            with gs2:
-                st.metric(
-                    "SSIM vs input",
-                    _format_metric_float(
-                        float(st.session_state.get("streamlit_geotiff_ssim_vs_input", 0.0)),
-                        nd=4,
+                    (
+                        "Norm. RMSE (in vs out)",
+                        _format_metric_float(
+                            float(
+                                st.session_state.get(
+                                    "streamlit_geotiff_norm_rmse", 0.0
+                                )
+                            )
+                        ),
                     ),
-                    help="1 → identical to joint-normalized input.",
-                )
-            with gs3:
-                st.metric(
-                    "Var (denoised, norm.)",
-                    _format_metric_float(float(bq.get("variance", 0.0))),
-                )
+                    (
+                        "σ denoised (norm.)",
+                        _format_metric_float(float(bq.get("std", 0.0))),
+                    ),
+                    (
+                        "PSNR vs input (dB)",
+                        _format_metric_float(
+                            float(
+                                st.session_state.get(
+                                    "streamlit_geotiff_psnr_vs_input", 0.0
+                                )
+                            ),
+                            nd=2,
+                        ),
+                    ),
+                    (
+                        "SSIM vs input",
+                        _format_metric_float(
+                            float(
+                                st.session_state.get(
+                                    "streamlit_geotiff_ssim_vs_input", 0.0
+                                )
+                            ),
+                            nd=4,
+                        ),
+                    ),
+                    (
+                        "Var (denoised, norm.)",
+                        _format_metric_float(float(bq.get("variance", 0.0))),
+                    ),
+                ]
+            )
+            st.caption(
+                "**PSNR / SSIM** — vs joint-normalized **observed input** (higher PSNR → less change). "
+                "Not vs. clean reflectivity."
+            )
 
     # Load sample from SAMPLE dataset (user-selected patch, not random)
     sample_dir = "data/sample_sar/processed/test_patches"
