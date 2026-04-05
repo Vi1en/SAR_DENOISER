@@ -158,6 +158,30 @@ def contrast_stretch_display_float01(img: np.ndarray) -> np.ndarray:
     return np.clip((a - lo) / (hi - lo), 0.0, 1.0).astype(np.float32)
 
 
+def contrast_stretch_percentile_float01(
+    img: np.ndarray, p_low: float = 2.0, p_high: float = 98.0
+) -> np.ndarray:
+    """
+    Display-only stretch for wide-dynamic-range SAR GeoTIFFs.
+
+    Min–max can map almost the whole scene to black when a few pixels are much
+    brighter (common for amplitude / gamma0). Percentile limits ignore those tails.
+    """
+    a = np.asarray(img, dtype=np.float64)
+    v = a[np.isfinite(a)]
+    if v.size == 0:
+        return np.zeros_like(a, dtype=np.float32)
+    lo = float(np.percentile(v, p_low))
+    hi = float(np.percentile(v, p_high))
+    if hi <= lo + 1e-12:
+        lo = float(np.min(v))
+        hi = float(np.max(v))
+    if hi <= lo + 1e-12:
+        return np.clip(a.astype(np.float32), 0.0, 1.0)
+    out = np.clip((a - lo) / (hi - lo), 0.0, 1.0)
+    return np.ascontiguousarray(out.astype(np.float32))
+
+
 def sample_patch_stats(img: np.ndarray) -> dict:
     """Scalar stats for a single-channel float patch."""
     a = np.asarray(img, dtype=np.float64)
@@ -680,10 +704,10 @@ with col1:
                                         )
 
                                     st.session_state["streamlit_geotiff_in_vis"] = (
-                                        contrast_stretch_display_float01(arr_in)
+                                        contrast_stretch_percentile_float01(arr_in)
                                     )
                                     st.session_state["streamlit_geotiff_out_vis"] = (
-                                        contrast_stretch_display_float01(arr_out)
+                                        contrast_stretch_percentile_float01(arr_out)
                                     )
                                     lo = float(min(arr_in.min(), arr_out.min()))
                                     hi = float(max(arr_in.max(), arr_out.max()))
@@ -756,9 +780,10 @@ with col1:
             st.markdown("---")
             st.subheader("GeoTIFF — comparison & metrics")
             st.caption(
-                "Display: **per-image** min–max stretch. Metrics: **joint** min–max to [0, 1] "
-                "for blind QA. **True reflectivity ground truth** is usually unknown for real SAR; "
-                "PSNR/SSIM here are **vs. the observed input** (not vs. clean)."
+                "Display: **per-image 2–98% percentile** stretch (min–max would often look black "
+                "on real SAR when a few pixels are much brighter). Metrics: **joint** min–max to "
+                "[0, 1] for blind QA. **True reflectivity ground truth** is usually unknown for "
+                "real SAR; PSNR/SSIM here are **vs. the observed input** (not vs. clean)."
             )
             _gml = st.session_state.get("streamlit_geotiff_method_label", method)
             gc1, gc2, gc3, gc4 = st.columns(4)
