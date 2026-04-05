@@ -14,6 +14,7 @@ st.set_page_config(
 import csv
 import hashlib
 import io
+import math
 import os
 import random
 import re
@@ -74,7 +75,13 @@ def _cuda_available() -> bool:
         return False
 
 
-from algos.evaluation import calculate_metrics, calculate_ssim
+from algos.evaluation import (
+    calculate_enl,
+    calculate_metrics,
+    calculate_psnr,
+    calculate_ssim,
+)
+from evaluators.blind_qa import compute_blind_qa
 from api import storage as job_storage
 from api.infer_config import get_merged, service_options_from_merged
 from inference.geotiff import denoise_geotiff, make_tile_denoise_fn
@@ -98,6 +105,31 @@ def comparison_abs_diff_map(noisy: np.ndarray, denoised: np.ndarray) -> np.ndarr
     diff = np.abs(noisy.astype(np.float64) - denoised.astype(np.float64))
     p99 = float(np.percentile(diff, 99)) if diff.size else 1.0
     return np.clip(diff / (p99 + 1e-8), 0.0, 1.0).astype(np.float32)
+
+
+_GEOTIFF_VIZ_STATE_KEYS = (
+    "streamlit_geotiff_in_vis",
+    "streamlit_geotiff_out_vis",
+    "streamlit_geotiff_diff_vis",
+    "streamlit_geotiff_blind_qa",
+    "streamlit_geotiff_enl_input",
+    "streamlit_geotiff_enl_output",
+    "streamlit_geotiff_norm_rmse",
+    "streamlit_geotiff_ssim_vs_input",
+    "streamlit_geotiff_psnr_vs_input",
+    "streamlit_geotiff_method_label",
+)
+
+
+def _clear_geotiff_viz_state() -> None:
+    for k in _GEOTIFF_VIZ_STATE_KEYS:
+        st.session_state.pop(k, None)
+
+
+def _format_metric_float(x: float, *, nd: int = 4) -> str:
+    if x is None or (isinstance(x, float) and (math.isnan(x) or math.isinf(x))):
+        return "—"
+    return f"{float(x):.{nd}f}"
 
 
 def load_sample_noisy_patch_float01(noisy_dir: str, filename: str):
@@ -585,6 +617,7 @@ with col1:
                     if len(gt_raw) > 500 * 1024 * 1024:
                         st.error("File exceeds **500 MB** demo limit.")
                     else:
+                        _clear_geotiff_viz_state()
                         with st.spinner("Denoising GeoTIFF (windowed)…"):
                             try:
                                 merged = get_merged()
@@ -636,6 +669,63 @@ with col1:
                                     )
                                     gt_bytes = gt_out.read_bytes()
 
+                                    with rasterio.open(gt_in) as s_in, rasterio.open(
+                                        gt_out
+                                    ) as s_out:
+                                        arr_in = s_in.read(1).astype(np.float32)
+                                        arr_out = s_out.read(1).astype(np.float32)
+                                    if arr_in.shape != arr_out.shape:
+                                        raise ValueError(
+                                            f"Input/output shape mismatch: {arr_in.shape} vs {arr_out.shape}"
+                                        )
+
+                                    st.session_state["streamlit_geotiff_in_vis"] = (
+                                        contrast_stretch_display_float01(arr_in)
+                                    )
+                                    st.session_state["streamlit_geotiff_out_vis"] = (
+                                        contrast_stretch_display_float01(arr_out)
+                                    )
+                                    lo = float(min(arr_in.min(), arr_out.min()))
+                                    hi = float(max(arr_in.max(), arr_out.max()))
+                                    scale = hi - lo + 1e-8
+                                    n_in = np.clip(
+                                        (arr_in - lo) / scale, 0.0, 1.0
+                                    ).astype(np.float32)
+                                    n_out = np.clip(
+                                        (arr_out - lo) / scale, 0.0, 1.0
+                                    ).astype(np.float32)
+                                    st.session_state["streamlit_geotiff_diff_vis"] = (
+                                        comparison_abs_diff_map(n_in, n_out)
+                                    )
+                                    st.session_state["streamlit_geotiff_blind_qa"] = (
+                                        compute_blind_qa(n_in, n_out)
+                                    )
+                                    st.session_state["streamlit_geotiff_enl_input"] = (
+                                        calculate_enl(n_in)
+                                    )
+                                    st.session_state["streamlit_geotiff_enl_output"] = (
+                                        calculate_enl(n_out)
+                                    )
+                                    st.session_state["streamlit_geotiff_norm_rmse"] = (
+                                        float(
+                                            np.sqrt(
+                                                np.mean(
+                                                    (n_in - n_out) ** 2,
+                                                    dtype=np.float64,
+                                                )
+                                            )
+                                        )
+                                    )
+                                    st.session_state["streamlit_geotiff_ssim_vs_input"] = (
+                                        float(calculate_ssim(n_in, n_out))
+                                    )
+                                    st.session_state["streamlit_geotiff_psnr_vs_input"] = (
+                                        float(calculate_psnr(n_in, n_out))
+                                    )
+                                    st.session_state["streamlit_geotiff_method_label"] = (
+                                        method
+                                    )
+
                                 stem = Path(input_label).stem
                                 safe_gt = re.sub(r"[^a-zA-Z0-9._-]+", "_", stem).strip(
                                     "._-"
@@ -644,8 +734,11 @@ with col1:
                                 st.session_state["streamlit_geotiff_fn"] = (
                                     f"{safe_gt}_denoised.tif"
                                 )
-                                st.success("GeoTIFF ready — download below.")
+                                st.success(
+                                    "GeoTIFF ready — preview & metrics below; download when needed."
+                                )
                             except Exception as e:
+                                _clear_geotiff_viz_state()
                                 st.error(f"GeoTIFF processing failed: {e}")
 
         if st.session_state.get("streamlit_geotiff_out"):
@@ -658,6 +751,111 @@ with col1:
                 mime="image/tiff",
                 key="streamlit_geotiff_download",
             )
+
+        if st.session_state.get("streamlit_geotiff_in_vis") is not None:
+            st.markdown("---")
+            st.subheader("GeoTIFF — comparison & metrics")
+            st.caption(
+                "Display: **per-image** min–max stretch. Metrics: **joint** min–max to [0, 1] "
+                "for blind QA. **True reflectivity ground truth** is usually unknown for real SAR; "
+                "PSNR/SSIM here are **vs. the observed input** (not vs. clean)."
+            )
+            _gml = st.session_state.get("streamlit_geotiff_method_label", method)
+            gc1, gc2, gc3, gc4 = st.columns(4)
+            with gc1:
+                st.image(
+                    st.session_state["streamlit_geotiff_in_vis"],
+                    caption="Input (observed GeoTIFF)",
+                    use_container_width=True,
+                    clamp=True,
+                )
+            with gc2:
+                st.image(
+                    st.session_state["streamlit_geotiff_out_vis"],
+                    caption=f"Denoised ({_gml})",
+                    use_container_width=True,
+                    clamp=True,
+                )
+            with gc3:
+                st.image(
+                    st.session_state["streamlit_geotiff_diff_vis"],
+                    caption="|input − denoised| (joint norm., 99th pct. stretch)",
+                    use_container_width=True,
+                    clamp=True,
+                )
+            with gc4:
+                st.markdown("**Reflectivity ground truth**")
+                st.info(
+                    "Not bundled for real Sentinel-1 / uploaded GeoTIFFs. "
+                    "For **PSNR / SSIM vs clean**, use **SAMPLE** PNG patches (noisy + clean)."
+                )
+
+            bq = st.session_state.get("streamlit_geotiff_blind_qa") or {}
+            ein = st.session_state.get("streamlit_geotiff_enl_input")
+            eout = st.session_state.get("streamlit_geotiff_enl_output")
+
+            def _fmt_enl(v: object) -> str:
+                if v is None:
+                    return "—"
+                fv = float(v)
+                if math.isinf(fv):
+                    return "∞"
+                if math.isnan(fv):
+                    return "—"
+                return f"{fv:.3f}"
+
+            gm1, gm2, gm3, gm4, gm5, gm6 = st.columns(6)
+            with gm1:
+                st.metric("ENL (input, global)", _fmt_enl(ein))
+            with gm2:
+                st.metric("ENL (denoised, global)", _fmt_enl(eout))
+            with gm3:
+                st.metric(
+                    "ENL homog. (denoised)",
+                    _format_metric_float(float(bq.get("enl_homogeneous_median", 0.0))),
+                )
+            with gm4:
+                st.metric(
+                    "Edge pres. vs input",
+                    _format_metric_float(float(bq.get("edge_preservation_vs_input", 0.0))),
+                )
+            with gm5:
+                st.metric(
+                    "Norm. RMSE (in vs out)",
+                    _format_metric_float(
+                        float(st.session_state.get("streamlit_geotiff_norm_rmse", 0.0))
+                    ),
+                )
+            with gm6:
+                st.metric(
+                    "σ denoised (norm.)",
+                    _format_metric_float(float(bq.get("std", 0.0))),
+                )
+
+            gs1, gs2, gs3 = st.columns(3)
+            with gs1:
+                st.metric(
+                    "PSNR vs input (dB)",
+                    _format_metric_float(
+                        float(st.session_state.get("streamlit_geotiff_psnr_vs_input", 0.0)),
+                        nd=2,
+                    ),
+                    help="Higher → denoised closer to observed input (less change).",
+                )
+            with gs2:
+                st.metric(
+                    "SSIM vs input",
+                    _format_metric_float(
+                        float(st.session_state.get("streamlit_geotiff_ssim_vs_input", 0.0)),
+                        nd=4,
+                    ),
+                    help="1 → identical to joint-normalized input.",
+                )
+            with gs3:
+                st.metric(
+                    "Var (denoised, norm.)",
+                    _format_metric_float(float(bq.get("variance", 0.0))),
+                )
 
     # Load sample from SAMPLE dataset (user-selected patch, not random)
     sample_dir = "data/sample_sar/processed/test_patches"
