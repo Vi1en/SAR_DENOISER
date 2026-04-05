@@ -34,9 +34,14 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-SAMPLE_GEOTIFF_PATH = (
-    PROJECT_ROOT / "data" / "sample_geotiff" / "presentation_sample.tif"
-)
+def _bundled_geotiff_path() -> Path:
+    """Prefer real Sentinel-1 RTC chip; fall back to tiny PNG/synthetic sample."""
+    d = PROJECT_ROOT / "data" / "sample_geotiff"
+    for name in ("sentinel1_rtc_sample.tif", "presentation_sample.tif"):
+        p = d / name
+        if p.is_file():
+            return p
+    return d / "sentinel1_rtc_sample.tif"
 
 
 def _ensure_pyyaml() -> None:
@@ -505,25 +510,26 @@ with col1:
         with col_gt_a:
             if st.button(
                 "Load bundled presentation sample",
-                help=f"Uses `{SAMPLE_GEOTIFF_PATH.relative_to(PROJECT_ROOT)}` "
-                "(single-band GeoTIFF shipped with the repo for demos).",
+                help="Loads `data/sample_geotiff/sentinel1_rtc_sample.tif` (real Sentinel-1) "
+                "or `presentation_sample.tif` if the RTC file is missing.",
                 key="streamlit_geotiff_load_sample",
             ):
-                if not SAMPLE_GEOTIFF_PATH.is_file():
+                sample_path = _bundled_geotiff_path()
+                if not sample_path.is_file():
                     st.error(
-                        "Bundled sample not found. From the repo root run: "
-                        "`python scripts/build_sample_geotiff.py` (requires **rasterio**)."
+                        "Bundled GeoTIFF not found. From the repo root run:\n\n"
+                        "**Real Sentinel-1 chip:** `python scripts/download_real_sample_geotiff.py`\n\n"
+                        "**Tiny fallback:** `python scripts/build_sample_geotiff.py`\n\n"
+                        "(both need **rasterio**)."
                     )
                 else:
                     st.session_state["streamlit_geotiff_sample_bytes"] = (
-                        SAMPLE_GEOTIFF_PATH.read_bytes()
+                        sample_path.read_bytes()
                     )
-                    st.session_state["streamlit_geotiff_sample_name"] = (
-                        SAMPLE_GEOTIFF_PATH.name
-                    )
+                    st.session_state["streamlit_geotiff_sample_name"] = sample_path.name
                     st.success(
-                        f"Loaded **{SAMPLE_GEOTIFF_PATH.name}** — set tile size if needed, "
-                        "then **Run GeoTIFF denoising**."
+                        f"Loaded **{sample_path.name}** — set tile size if needed "
+                        "(e.g. **1024** for the RTC sample), then **Run GeoTIFF denoising**."
                     )
         with col_gt_b:
             if st.session_state.get("streamlit_geotiff_sample_bytes") and st.button(
@@ -558,7 +564,7 @@ with col1:
                 gt_raw = st.session_state["streamlit_geotiff_sample_bytes"]
                 input_label = str(
                     st.session_state.get(
-                        "streamlit_geotiff_sample_name", "presentation_sample.tif"
+                        "streamlit_geotiff_sample_name", "sentinel1_rtc_sample.tif"
                     )
                 )
 

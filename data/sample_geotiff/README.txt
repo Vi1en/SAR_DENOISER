@@ -1,7 +1,13 @@
-presentation_sample.tif — small single-band GeoTIFF (EPSG:4326) for Streamlit demos.
+GeoTIFF samples for Streamlit / talks
 
-Regenerate from repo root:
-  python scripts/build_sample_geotiff.py
+1) sentinel1_rtc_sample.tif  (~3–4 MB, 1024×1024)
+   Real Sentinel-1 IW GRD RTC VV chip (EPSG:32632), georeferenced.
+   Regenerate:
+     python scripts/download_real_sample_geotiff.py
+   Options: --chip 512 --out path/to/out.tif
 
-Uses the first noisy SAMPLE patch PNG when data/sample_sar/.../noisy exists;
-otherwise writes a synthetic speckle patch. Requires rasterio.
+2) presentation_sample.tif  (tiny fallback)
+   From SAMPLE PNG or synthetic speckle:
+     python scripts/build_sample_geotiff.py
+
+Attribution for (1): ATTRIBUTION.txt

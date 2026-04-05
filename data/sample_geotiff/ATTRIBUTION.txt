@@ -1,0 +1,15 @@
+Real SAR sample: Sentinel-1 (Copernicus Programme / ESA)
+
+File: sentinel1_rtc_sample.tif
+  • Source: Microsoft Planetary Computer, collection "sentinel-1-rtc"
+    (Radiometric Terrain Corrected GRD; VV backscatter, gamma0).
+  • STAC item id is stored in the GeoTIFF metadata tag STAC_ITEM.
+  • Obtained via the public STAC API and Planetary Computer blob SAS signing
+    endpoint (see scripts/download_real_sample_geotiff.py).
+
+Legal / use:
+  • Sentinel data: https://sentinel.esa.int/documents/247904/690755/Sentinel_Data_Legal_Notice
+  • Registry of Open Data on AWS / Planetary Computer terms apply to API access.
+
+Presentation_sample.tif (if present) is a small synthetic or PNG-derived chip
+used only as a lightweight fallback; it is not ESA product data.

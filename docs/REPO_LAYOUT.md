@@ -21,6 +21,7 @@ python sar.py eval --help
 python scripts/evaluate_sample.py --help
 python scripts/train_improved.py --help
 streamlit run demo/streamlit_app.py
+python scripts/download_real_sample_geotiff.py   # real Sentinel-1 GeoTIFF chip into data/sample_geotiff/
 pytest -q
 ```
 

@@ -342,6 +342,8 @@ streamlit run demo/streamlit_app.py
 
 Single-band, **georeferenced** GeoTIFFs only (`rasterio` is in **`requirements.txt`**). The CLI reads the raster in **windows** (default tile 512×512), denoises each tile, and writes a float32 GeoTIFF with the **same CRS and geotransform** as the input. **`overlap` must be 0** in this version (non-overlapping tiles; overlap blending is future work). **Nodata** pixels are left unchanged where possible.
 
+**Bundled demo chip:** `data/sample_geotiff/sentinel1_rtc_sample.tif` is a **1024×1024** real **Sentinel-1 RTC** VV patch (EPSG:32632), committed for Streamlit talks. Regenerate or resize with `python scripts/download_real_sample_geotiff.py` (see `data/sample_geotiff/ATTRIBUTION.txt`). The Streamlit expander **Load bundled presentation sample** prefers this file, then falls back to `presentation_sample.tif`.
+
 **Normalization:** each tile is min–max scaled to `[0, 1]` before the model and rescaled afterward. This does **not** infer amplitude vs dB; align with how you trained the network.
 
 ```bash
