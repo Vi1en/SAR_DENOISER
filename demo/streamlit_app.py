@@ -1455,7 +1455,9 @@ with col2:
                         raw_outputs,
                     )
                 ]
-            st.success("✅ Multi-method run complete — see section below.")
+            st.success(
+                "✅ Multi-method run complete — scroll down in **Denoising Results** for comparison & charts."
+            )
 
     # Display results
     if 'denoised_image' in st.session_state:
@@ -1524,338 +1526,338 @@ with col2:
             with st.expander("Raw blind_qa JSON"):
                 st.json(_bq)
 
-# Multi-method comparison (TV / Direct / ADMM in one run, shared display scaling)
-if st.session_state.get("multi_method_comparison"):
-    st.markdown("---")
-    st.subheader("Multi-method comparison")
-    st.caption(
-        "One run with **TV**, **Direct**, and **ADMM-PnP-DL** using the same sidebar settings. "
-        "Each panel uses a **2–98% percentile stretch** so different output scales stay visible "
-        "(a **shared** min–max would often wash out **Direct** when its range is smaller than TV/ADMM, "
-        "e.g. no `checkpoints_simple` on Cloud). **Direct** still needs a real checkpoint for meaningful denoising."
-    )
-    mc = st.session_state["multi_method_comparison"]
-    if any("raw" not in e for e in mc):
-        st.warning(
-            "Re-run **Run All Methods** once to enable comparison metrics and charts "
-            "(this session was stored before raw outputs were saved)."
-        )
-    mcol1, mcol2, mcol3 = st.columns(3)
-    for col, entry in zip((mcol1, mcol2, mcol3), mc):
-        with col:
-            st.image(
-                entry["display"],
-                caption=entry["name"],
-                use_container_width=True,
-                clamp=True,
-            )
-            st.metric("Inference time", f"{entry['seconds']:.3f} s")
-
-    st.markdown("##### Comparison charts")
-    names_short = [e["name"].replace(" Denoising", "").replace("-PnP-DL", "") for e in mc]
-    secs = [float(e["seconds"]) for e in mc]
-    fig_t, ax_t = plt.subplots(figsize=(8, 3.2))
-    ax_t.bar(names_short, secs, color=["#4e79a7", "#f28e2b", "#59a14f"])
-    ax_t.set_ylabel("Seconds")
-    ax_t.set_title("Inference time (multi-method run)")
-    ax_t.grid(True, axis="y", alpha=0.3)
-    plt.tight_layout()
-    st.pyplot(fig_t)
-    plt.close(fig_t)
-
-    noisy_m = st.session_state.get("noisy_image")
-    clean_m = st.session_state.get("clean_image")
-    ref_ok = (
-        clean_m is not None
-        and noisy_m is not None
-        and all(
-            e.get("raw") is not None
-            and np.asarray(e["raw"]).shape == np.asarray(clean_m).shape
-            for e in mc
-        )
-    )
-
-    if ref_ok:
-        st.markdown("##### Metrics vs ground truth (clean reference)")
-        st.caption(
-            "PSNR / SSIM / ENL use **`clean_image`** from SAMPLE or synthetic paired data "
-            "(same shape as the noisy input)."
-        )
-        psnr_v, ssim_v, enl_v = [], [], []
-        for e in mc:
-            raw = np.asarray(e["raw"], dtype=np.float32)
-            m = calculate_metrics(np.asarray(clean_m, dtype=np.float32), raw)
-            psnr_v.append(float(m["psnr"]))
-            ssim_v.append(float(m["ssim"]))
-            enl_v.append(float(m["enl"]) if np.isfinite(m["enl"]) else float("nan"))
-
-        mt1, mt2, mt3 = st.columns(3)
-        for i, e in enumerate(mc):
-            with [mt1, mt2, mt3][i]:
-                st.markdown(f"**{e['name']}**")
-                st.metric("PSNR", f"{psnr_v[i]:.2f} dB")
-                st.metric("SSIM", f"{ssim_v[i]:.4f}")
-                st.metric("ENL", f"{enl_v[i]:.2f}" if np.isfinite(enl_v[i]) else "—")
-
-        fig_q, (ax_p, ax_s) = plt.subplots(1, 2, figsize=(9, 3.2))
-        ax_p.bar(names_short, psnr_v, color=["#4e79a7", "#f28e2b", "#59a14f"])
-        ax_p.set_ylabel("dB")
-        ax_p.set_title("PSNR vs clean")
-        ax_p.grid(True, axis="y", alpha=0.3)
-        ax_s.bar(names_short, ssim_v, color=["#4e79a7", "#f28e2b", "#59a14f"])
-        ax_s.set_ylabel("SSIM")
-        ax_s.set_ylim(0.0, 1.05)
-        ax_s.set_title("SSIM vs clean")
-        ax_s.grid(True, axis="y", alpha=0.3)
-        plt.tight_layout()
-        st.pyplot(fig_q)
-        plt.close(fig_q)
-
-        fig_e, ax_e = plt.subplots(figsize=(8, 3.0))
-        enl_plot = [v if np.isfinite(v) else 0.0 for v in enl_v]
-        ax_e.bar(names_short, enl_plot, color=["#4e79a7", "#f28e2b", "#59a14f"])
-        ax_e.set_ylabel("ENL")
-        ax_e.set_title("ENL of denoised vs clean (global)")
-        ax_e.grid(True, axis="y", alpha=0.3)
-        plt.tight_layout()
-        st.pyplot(fig_e)
-        plt.close(fig_e)
-    else:
-        st.markdown("##### No-reference metrics (vs noisy input)")
-        if clean_m is not None and noisy_m is not None:
-            st.caption(
-                "**Clean reference** is present but **shape** does not match this multi-method "
-                "output — load a SAMPLE pair or matching synthetic image. Showing blind QA only."
-            )
-        else:
-            st.caption(
-                "No **clean** image in session — load from **SAMPLE** (noisy + clean) or "
-                "**synthetic** for **PSNR/SSIM vs ground truth**. Below: blind proxies per method."
-            )
-        if noisy_m is None:
-            st.info("No noisy image in session.")
-        else:
-            noisy_a = np.asarray(noisy_m, dtype=np.float32)
-            bq_rows = []
-            for e in mc:
-                raw = e.get("raw")
-                if raw is None:
-                    continue
-                raw = np.asarray(raw, dtype=np.float32)
-                if raw.shape != noisy_a.shape:
-                    bq_rows.append(
-                        {
-                            "Method": e["name"],
-                            "Note": "shape mismatch vs noisy",
-                        }
-                    )
-                    continue
-                lo = float(min(noisy_a.min(), raw.min()))
-                hi = float(max(noisy_a.max(), raw.max()))
-                sc = hi - lo + 1e-8
-                n0 = np.clip((noisy_a - lo) / sc, 0.0, 1.0).astype(np.float32)
-                n1 = np.clip((raw - lo) / sc, 0.0, 1.0).astype(np.float32)
-                try:
-                    bq = compute_blind_qa(n0, n1)
-                    bq_rows.append(
-                        {
-                            "Method": e["name"],
-                            "ENL homog.": f"{float(bq['enl_homogeneous_median']):.3f}",
-                            "Edge pres.": f"{float(bq['edge_preservation_vs_input']):.4f}",
-                            "σ (norm.)": f"{float(bq['std']):.5f}",
-                        }
-                    )
-                except Exception as ex:
-                    bq_rows.append({"Method": e["name"], "Note": str(ex)[:80]})
-
-            if bq_rows:
-                st.dataframe(bq_rows, use_container_width=True, hide_index=True)
-
-            homog = []
-            edgep = []
-            for e in mc:
-                raw = e.get("raw")
-                if raw is None or noisy_a.shape != np.asarray(raw).shape:
-                    homog.append(0.0)
-                    edgep.append(0.0)
-                    continue
-                raw = np.asarray(raw, dtype=np.float32)
-                lo = float(min(noisy_a.min(), raw.min()))
-                hi = float(max(noisy_a.max(), raw.max()))
-                sc = hi - lo + 1e-8
-                n0 = np.clip((noisy_a - lo) / sc, 0.0, 1.0).astype(np.float32)
-                n1 = np.clip((raw - lo) / sc, 0.0, 1.0).astype(np.float32)
-                try:
-                    bq = compute_blind_qa(n0, n1)
-                    homog.append(float(bq["enl_homogeneous_median"]))
-                    edgep.append(float(bq["edge_preservation_vs_input"]))
-                except Exception:
-                    homog.append(0.0)
-                    edgep.append(0.0)
-
-            if any(h > 0 for h in homog):
-                fig_b, (ax_h, ax_b) = plt.subplots(1, 2, figsize=(9, 3.2))
-                ax_h.bar(names_short, homog, color=["#4e79a7", "#f28e2b", "#59a14f"])
-                ax_h.set_title("ENL homogeneous (median, denoised)")
-                ax_h.grid(True, axis="y", alpha=0.3)
-                ax_b.bar(names_short, edgep, color=["#4e79a7", "#f28e2b", "#59a14f"])
-                ax_b.set_title("Edge preservation vs input")
-                ax_b.set_ylim(0.0, max(1.05, max(edgep) * 1.15 if edgep else 1.0))
-                ax_b.grid(True, axis="y", alpha=0.3)
-                plt.tight_layout()
-                st.pyplot(fig_b)
-                plt.close(fig_b)
-
-# Comparison Dashboard — interactive blend, absolute difference, discrete view toggles
-if "denoised_image" in st.session_state and "noisy_image" in st.session_state:
-    st.markdown("---")
-    st.subheader("Comparison Dashboard")
-    st.caption(
-        "Inspect noisy vs denoised without re-running inference. "
-        "Blend uses **α×denoised + (1−α)×noisy**; difference map uses |noisy−denoised| (display-normalized)."
-    )
-    noisy_cd = np.asarray(st.session_state["noisy_image"], dtype=np.float32)
-    den_cd = np.asarray(st.session_state["denoised_image"], dtype=np.float32)
-    if noisy_cd.shape != den_cd.shape:
-        st.warning("Input and denoised shapes differ; comparison dashboard skipped.")
-    else:
-        view_mode = st.radio(
-            "View",
-            (
-                "Interactive blend (slider)",
-                "Original (noisy)",
-                "Denoised",
-                "Absolute difference",
-            ),
-            horizontal=True,
-            key="comparison_dashboard_view",
-        )
-        if view_mode == "Interactive blend (slider)":
-            alpha_blend = st.slider(
-                "Opacity on denoised (α): 0 = full noisy, 1 = full denoised",
-                min_value=0.0,
-                max_value=1.0,
-                value=0.5,
-                step=0.01,
-                key="comparison_dashboard_alpha",
-            )
-            blended = comparison_blend_noisy_denoised(noisy_cd, den_cd, alpha_blend)
-            st.image(
-                blended,
-                caption=(
-                    f"Blend: {(1.0 - alpha_blend) * 100:.0f}% noisy + {alpha_blend * 100:.0f}% denoised "
-                    f"(α={alpha_blend:.2f})"
-                ),
-                use_container_width=True,
-                clamp=True,
-            )
-        elif view_mode == "Original (noisy)":
-            st.image(
-                noisy_cd,
-                caption="Original (noisy) input",
-                use_container_width=True,
-                clamp=True,
-            )
-        elif view_mode == "Denoised":
-            st.image(
-                den_cd,
-                caption="Denoised output",
-                use_container_width=True,
-                clamp=True,
-            )
-        else:
-            diff_vis = comparison_abs_diff_map(noisy_cd, den_cd)
-            st.image(
-                diff_vis,
-                caption="Absolute difference |noisy − denoised| (99th pct. stretch)",
-                use_container_width=True,
-                clamp=True,
-            )
-
-# Bottom section for detailed results
-if 'denoised_image' in st.session_state and 'energies' in st.session_state:
-    st.markdown("---")
-    st.subheader("📈 Algorithm Monitoring")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        # Energy plot
-        if len(st.session_state['energies']) > 1:
-            fig, ax = plt.subplots(figsize=(8, 4))
-            ax.plot(st.session_state['energies'])
-            ax.set_xlabel('Iteration')
-            ax.set_ylabel('Energy')
-            ax.set_title('ADMM Energy Convergence')
-            ax.grid(True)
-            st.pyplot(fig)
-    
-    with col2:
-        # Residual plot
-        if len(st.session_state['residuals']) > 1:
-            fig, ax = plt.subplots(figsize=(8, 4))
-            ax.plot(st.session_state['residuals'])
-            ax.set_xlabel('Iteration')
-            ax.set_ylabel('Residual')
-            ax.set_title('ADMM Residual Convergence')
-            ax.grid(True)
-            st.pyplot(fig)
-
-# Comparison section
-if 'denoised_image' in st.session_state and 'noisy_image' in st.session_state:
-    st.markdown("---")
-    st.subheader("🔄 Image Comparison")
-    
-    n_compare_cols = 4 if 'uncertainty_u8' in st.session_state else 3
-    cols = st.columns(n_compare_cols)
-    
-    with cols[0]:
-        st.image(st.session_state['noisy_image'], caption="Noisy SAR Input", use_container_width=True, clamp=True)
-    
-    with cols[1]:
-        cap = f"Denoised ({method})"
-        st.image(st.session_state['denoised_image'], caption=cap, use_container_width=True, clamp=True)
-
-    if 'uncertainty_u8' in st.session_state:
-        with cols[2]:
-            st.image(
-                st.session_state['uncertainty_u8'],
-                caption="Uncertainty (TTA)",
-                use_container_width=True,
-            )
-        gt_col = cols[3]
-    else:
-        gt_col = cols[2]
-    
-    with gt_col:
-        if (
-            "clean_image" in st.session_state
-            and st.session_state["clean_image"] is not None
-        ):
-            st.image(
-                st.session_state["clean_image"],
-                caption="Ground Truth",
-                use_container_width=True,
-                clamp=True,
-            )
-        else:
-            st.info("No ground truth available for uploaded images")
-    
-    # Quality Enhancement Mode comparison
-    if quality_enhancement and 'denoised_image' in st.session_state:
+    # Multi-method comparison (TV / Direct / ADMM in one run, shared display scaling)
+    if st.session_state.get("multi_method_comparison"):
         st.markdown("---")
-        st.subheader("✨ Quality Enhancement Results")
-        st.info("🔍 Enhanced processing applied: Gaussian blur + Non-local means denoising for superior clarity")
-        
-        # Show processing statistics
-        col1, col2, col3 = st.columns(3)
+        st.subheader("Multi-method comparison")
+        st.caption(
+            "One run with **TV**, **Direct**, and **ADMM-PnP-DL** using the same sidebar settings. "
+            "Each panel uses a **2–98% percentile stretch** so different output scales stay visible "
+            "(a **shared** min–max would often wash out **Direct** when its range is smaller than TV/ADMM, "
+            "e.g. no `checkpoints_simple` on Cloud). **Direct** still needs a real checkpoint for meaningful denoising."
+        )
+        mc = st.session_state["multi_method_comparison"]
+        if any("raw" not in e for e in mc):
+            st.warning(
+                "Re-run **Run All Methods** once to enable comparison metrics and charts "
+                "(this session was stored before raw outputs were saved)."
+            )
+        mcol1, mcol2, mcol3 = st.columns(3)
+        for col, entry in zip((mcol1, mcol2, mcol3), mc):
+            with col:
+                st.image(
+                    entry["display"],
+                    caption=entry["name"],
+                    use_container_width=True,
+                    clamp=True,
+                )
+                st.metric("Inference time", f"{entry['seconds']:.3f} s")
+
+        st.markdown("##### Comparison charts")
+        names_short = [e["name"].replace(" Denoising", "").replace("-PnP-DL", "") for e in mc]
+        secs = [float(e["seconds"]) for e in mc]
+        fig_t, ax_t = plt.subplots(figsize=(8, 3.2))
+        ax_t.bar(names_short, secs, color=["#4e79a7", "#f28e2b", "#59a14f"])
+        ax_t.set_ylabel("Seconds")
+        ax_t.set_title("Inference time (multi-method run)")
+        ax_t.grid(True, axis="y", alpha=0.3)
+        plt.tight_layout()
+        st.pyplot(fig_t)
+        plt.close(fig_t)
+
+        noisy_m = st.session_state.get("noisy_image")
+        clean_m = st.session_state.get("clean_image")
+        ref_ok = (
+            clean_m is not None
+            and noisy_m is not None
+            and all(
+                e.get("raw") is not None
+                and np.asarray(e["raw"]).shape == np.asarray(clean_m).shape
+                for e in mc
+            )
+        )
+
+        if ref_ok:
+            st.markdown("##### Metrics vs ground truth (clean reference)")
+            st.caption(
+                "PSNR / SSIM / ENL use **`clean_image`** from SAMPLE or synthetic paired data "
+                "(same shape as the noisy input)."
+            )
+            psnr_v, ssim_v, enl_v = [], [], []
+            for e in mc:
+                raw = np.asarray(e["raw"], dtype=np.float32)
+                m = calculate_metrics(np.asarray(clean_m, dtype=np.float32), raw)
+                psnr_v.append(float(m["psnr"]))
+                ssim_v.append(float(m["ssim"]))
+                enl_v.append(float(m["enl"]) if np.isfinite(m["enl"]) else float("nan"))
+
+            mt1, mt2, mt3 = st.columns(3)
+            for i, e in enumerate(mc):
+                with [mt1, mt2, mt3][i]:
+                    st.markdown(f"**{e['name']}**")
+                    st.metric("PSNR", f"{psnr_v[i]:.2f} dB")
+                    st.metric("SSIM", f"{ssim_v[i]:.4f}")
+                    st.metric("ENL", f"{enl_v[i]:.2f}" if np.isfinite(enl_v[i]) else "—")
+
+            fig_q, (ax_p, ax_s) = plt.subplots(1, 2, figsize=(9, 3.2))
+            ax_p.bar(names_short, psnr_v, color=["#4e79a7", "#f28e2b", "#59a14f"])
+            ax_p.set_ylabel("dB")
+            ax_p.set_title("PSNR vs clean")
+            ax_p.grid(True, axis="y", alpha=0.3)
+            ax_s.bar(names_short, ssim_v, color=["#4e79a7", "#f28e2b", "#59a14f"])
+            ax_s.set_ylabel("SSIM")
+            ax_s.set_ylim(0.0, 1.05)
+            ax_s.set_title("SSIM vs clean")
+            ax_s.grid(True, axis="y", alpha=0.3)
+            plt.tight_layout()
+            st.pyplot(fig_q)
+            plt.close(fig_q)
+
+            fig_e, ax_e = plt.subplots(figsize=(8, 3.0))
+            enl_plot = [v if np.isfinite(v) else 0.0 for v in enl_v]
+            ax_e.bar(names_short, enl_plot, color=["#4e79a7", "#f28e2b", "#59a14f"])
+            ax_e.set_ylabel("ENL")
+            ax_e.set_title("ENL of denoised vs clean (global)")
+            ax_e.grid(True, axis="y", alpha=0.3)
+            plt.tight_layout()
+            st.pyplot(fig_e)
+            plt.close(fig_e)
+        else:
+            st.markdown("##### No-reference metrics (vs noisy input)")
+            if clean_m is not None and noisy_m is not None:
+                st.caption(
+                    "**Clean reference** is present but **shape** does not match this multi-method "
+                    "output — load a SAMPLE pair or matching synthetic image. Showing blind QA only."
+                )
+            else:
+                st.caption(
+                    "No **clean** image in session — load from **SAMPLE** (noisy + clean) or "
+                    "**synthetic** for **PSNR/SSIM vs ground truth**. Below: blind proxies per method."
+                )
+            if noisy_m is None:
+                st.info("No noisy image in session.")
+            else:
+                noisy_a = np.asarray(noisy_m, dtype=np.float32)
+                bq_rows = []
+                for e in mc:
+                    raw = e.get("raw")
+                    if raw is None:
+                        continue
+                    raw = np.asarray(raw, dtype=np.float32)
+                    if raw.shape != noisy_a.shape:
+                        bq_rows.append(
+                            {
+                                "Method": e["name"],
+                                "Note": "shape mismatch vs noisy",
+                            }
+                        )
+                        continue
+                    lo = float(min(noisy_a.min(), raw.min()))
+                    hi = float(max(noisy_a.max(), raw.max()))
+                    sc = hi - lo + 1e-8
+                    n0 = np.clip((noisy_a - lo) / sc, 0.0, 1.0).astype(np.float32)
+                    n1 = np.clip((raw - lo) / sc, 0.0, 1.0).astype(np.float32)
+                    try:
+                        bq = compute_blind_qa(n0, n1)
+                        bq_rows.append(
+                            {
+                                "Method": e["name"],
+                                "ENL homog.": f"{float(bq['enl_homogeneous_median']):.3f}",
+                                "Edge pres.": f"{float(bq['edge_preservation_vs_input']):.4f}",
+                                "σ (norm.)": f"{float(bq['std']):.5f}",
+                            }
+                        )
+                    except Exception as ex:
+                        bq_rows.append({"Method": e["name"], "Note": str(ex)[:80]})
+
+                if bq_rows:
+                    st.dataframe(bq_rows, use_container_width=True, hide_index=True)
+
+                homog = []
+                edgep = []
+                for e in mc:
+                    raw = e.get("raw")
+                    if raw is None or noisy_a.shape != np.asarray(raw).shape:
+                        homog.append(0.0)
+                        edgep.append(0.0)
+                        continue
+                    raw = np.asarray(raw, dtype=np.float32)
+                    lo = float(min(noisy_a.min(), raw.min()))
+                    hi = float(max(noisy_a.max(), raw.max()))
+                    sc = hi - lo + 1e-8
+                    n0 = np.clip((noisy_a - lo) / sc, 0.0, 1.0).astype(np.float32)
+                    n1 = np.clip((raw - lo) / sc, 0.0, 1.0).astype(np.float32)
+                    try:
+                        bq = compute_blind_qa(n0, n1)
+                        homog.append(float(bq["enl_homogeneous_median"]))
+                        edgep.append(float(bq["edge_preservation_vs_input"]))
+                    except Exception:
+                        homog.append(0.0)
+                        edgep.append(0.0)
+
+                if any(h > 0 for h in homog):
+                    fig_b, (ax_h, ax_b) = plt.subplots(1, 2, figsize=(9, 3.2))
+                    ax_h.bar(names_short, homog, color=["#4e79a7", "#f28e2b", "#59a14f"])
+                    ax_h.set_title("ENL homogeneous (median, denoised)")
+                    ax_h.grid(True, axis="y", alpha=0.3)
+                    ax_b.bar(names_short, edgep, color=["#4e79a7", "#f28e2b", "#59a14f"])
+                    ax_b.set_title("Edge preservation vs input")
+                    ax_b.set_ylim(0.0, max(1.05, max(edgep) * 1.15 if edgep else 1.0))
+                    ax_b.grid(True, axis="y", alpha=0.3)
+                    plt.tight_layout()
+                    st.pyplot(fig_b)
+                    plt.close(fig_b)
+
+    # Comparison Dashboard — interactive blend, absolute difference, discrete view toggles
+    if "denoised_image" in st.session_state and "noisy_image" in st.session_state:
+        st.markdown("---")
+        st.subheader("Comparison Dashboard")
+        st.caption(
+            "Inspect noisy vs denoised without re-running inference. "
+            "Blend uses **α×denoised + (1−α)×noisy**; difference map uses |noisy−denoised| (display-normalized)."
+        )
+        noisy_cd = np.asarray(st.session_state["noisy_image"], dtype=np.float32)
+        den_cd = np.asarray(st.session_state["denoised_image"], dtype=np.float32)
+        if noisy_cd.shape != den_cd.shape:
+            st.warning("Input and denoised shapes differ; comparison dashboard skipped.")
+        else:
+            view_mode = st.radio(
+                "View",
+                (
+                    "Interactive blend (slider)",
+                    "Original (noisy)",
+                    "Denoised",
+                    "Absolute difference",
+                ),
+                horizontal=True,
+                key="comparison_dashboard_view",
+            )
+            if view_mode == "Interactive blend (slider)":
+                alpha_blend = st.slider(
+                    "Opacity on denoised (α): 0 = full noisy, 1 = full denoised",
+                    min_value=0.0,
+                    max_value=1.0,
+                    value=0.5,
+                    step=0.01,
+                    key="comparison_dashboard_alpha",
+                )
+                blended = comparison_blend_noisy_denoised(noisy_cd, den_cd, alpha_blend)
+                st.image(
+                    blended,
+                    caption=(
+                        f"Blend: {(1.0 - alpha_blend) * 100:.0f}% noisy + {alpha_blend * 100:.0f}% denoised "
+                        f"(α={alpha_blend:.2f})"
+                    ),
+                    use_container_width=True,
+                    clamp=True,
+                )
+            elif view_mode == "Original (noisy)":
+                st.image(
+                    noisy_cd,
+                    caption="Original (noisy) input",
+                    use_container_width=True,
+                    clamp=True,
+                )
+            elif view_mode == "Denoised":
+                st.image(
+                    den_cd,
+                    caption="Denoised output",
+                    use_container_width=True,
+                    clamp=True,
+                )
+            else:
+                diff_vis = comparison_abs_diff_map(noisy_cd, den_cd)
+                st.image(
+                    diff_vis,
+                    caption="Absolute difference |noisy − denoised| (99th pct. stretch)",
+                    use_container_width=True,
+                    clamp=True,
+                )
+
+    # Bottom section for detailed results
+    if 'denoised_image' in st.session_state and 'energies' in st.session_state:
+        st.markdown("---")
+        st.subheader("📈 Algorithm Monitoring")
+    
+        col1, col2 = st.columns(2)
+    
         with col1:
-            st.metric("Input Range", f"{st.session_state['noisy_image'].min():.3f} - {st.session_state['noisy_image'].max():.3f}")
+            # Energy plot
+            if len(st.session_state['energies']) > 1:
+                fig, ax = plt.subplots(figsize=(8, 4))
+                ax.plot(st.session_state['energies'])
+                ax.set_xlabel('Iteration')
+                ax.set_ylabel('Energy')
+                ax.set_title('ADMM Energy Convergence')
+                ax.grid(True)
+                st.pyplot(fig)
+    
         with col2:
-            st.metric("Output Range", f"{st.session_state['denoised_image'].min():.3f} - {st.session_state['denoised_image'].max():.3f}")
-        with col3:
-            improvement = st.session_state['denoised_image'].std() / (st.session_state['noisy_image'].std() + 1e-8)
-            st.metric("Noise Reduction", f"{improvement:.2f}x")
+            # Residual plot
+            if len(st.session_state['residuals']) > 1:
+                fig, ax = plt.subplots(figsize=(8, 4))
+                ax.plot(st.session_state['residuals'])
+                ax.set_xlabel('Iteration')
+                ax.set_ylabel('Residual')
+                ax.set_title('ADMM Residual Convergence')
+                ax.grid(True)
+                st.pyplot(fig)
+
+    # Comparison section
+    if 'denoised_image' in st.session_state and 'noisy_image' in st.session_state:
+        st.markdown("---")
+        st.subheader("🔄 Image Comparison")
+    
+        n_compare_cols = 4 if 'uncertainty_u8' in st.session_state else 3
+        cols = st.columns(n_compare_cols)
+    
+        with cols[0]:
+            st.image(st.session_state['noisy_image'], caption="Noisy SAR Input", use_container_width=True, clamp=True)
+    
+        with cols[1]:
+            cap = f"Denoised ({method})"
+            st.image(st.session_state['denoised_image'], caption=cap, use_container_width=True, clamp=True)
+
+        if 'uncertainty_u8' in st.session_state:
+            with cols[2]:
+                st.image(
+                    st.session_state['uncertainty_u8'],
+                    caption="Uncertainty (TTA)",
+                    use_container_width=True,
+                )
+            gt_col = cols[3]
+        else:
+            gt_col = cols[2]
+    
+        with gt_col:
+            if (
+                "clean_image" in st.session_state
+                and st.session_state["clean_image"] is not None
+            ):
+                st.image(
+                    st.session_state["clean_image"],
+                    caption="Ground Truth",
+                    use_container_width=True,
+                    clamp=True,
+                )
+            else:
+                st.info("No ground truth available for uploaded images")
+    
+        # Quality Enhancement Mode comparison
+        if quality_enhancement and 'denoised_image' in st.session_state:
+            st.markdown("---")
+            st.subheader("✨ Quality Enhancement Results")
+            st.info("🔍 Enhanced processing applied: Gaussian blur + Non-local means denoising for superior clarity")
+        
+            # Show processing statistics
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Input Range", f"{st.session_state['noisy_image'].min():.3f} - {st.session_state['noisy_image'].max():.3f}")
+            with col2:
+                st.metric("Output Range", f"{st.session_state['denoised_image'].min():.3f} - {st.session_state['denoised_image'].max():.3f}")
+            with col3:
+                improvement = st.session_state['denoised_image'].std() / (st.session_state['noisy_image'].std() + 1e-8)
+                st.metric("Noise Reduction", f"{improvement:.2f}x")
 
 # Async job history — read-only view of data/jobs (FastAPI + Redis/RQ)
 st.markdown("---")
