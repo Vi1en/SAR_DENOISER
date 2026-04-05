@@ -7,7 +7,7 @@
 - Code pushed to GitHub (`main`).
 - Main file: **`demo/streamlit_app.py`**.
 - **Python 3.11:** set it in **Advanced settings** when you deploy. [Streamlit’s docs](https://docs.streamlit.io/deploy/streamlit-community-cloud/manage-your-app/upgrade-python) say the runtime cannot be changed after deploy without **delete + redeploy**; **`runtime.txt` in the repo is not guaranteed to be read by Cloud** (it is still useful for other hosts).
-- Dependencies: **`requirements.txt`** is slim (no **rasterio**, no FastAPI/Redis/RQ, **no ONNX** — those are in **`requirements-full.txt`**). **`PyYAML`** is listed explicitly. YAML is **lazy-imported** in code. **Do not** put `--extra-index-url` in `requirements.txt`: Streamlit’s **uv** step can fail resolving **`onnx` / `ml-dtypes` / `setuptools`** when the PyTorch index is listed first.
+- Dependencies: **`requirements.txt`** includes **rasterio** (GeoTIFF) and excludes FastAPI/Redis/RQ and **ONNX** (those are in **`requirements-full.txt`**). **`PyYAML`** is listed explicitly. YAML is **lazy-imported** in code. **Do not** put `--extra-index-url` in `requirements.txt`: Streamlit’s **uv** step can fail resolving **`onnx` / `ml-dtypes` / `setuptools`** when the PyTorch index is listed first.
 - **No `packages.txt`:** we removed it because mixed Debian sources on Cloud broke `apt` (e.g. `libglib2.0-0`). **`opencv-python-headless`** wheels usually do not need extra system packages on Cloud.
 
 ## Steps
@@ -32,7 +32,7 @@ The app is written to degrade gracefully when improved checkpoints are missing.
 
 ## GeoTIFF / rasterio
 
-GeoTIFF uses **`rasterio`** (may need GDAL on some hosts). If install fails on Cloud, use **upload + PNG workflow** only, or simplify GeoTIFF imports later. If you must add system libraries later, use a **`packages.txt`** with **one package name per line and no comments** (comment lines are passed to `apt-get` as bogus package names).
+GeoTIFF uses **`rasterio`**, which is listed in **`requirements.txt`** (prebuilt wheels on Streamlit’s Linux images in most cases). If **`pip` / `uv` still fails** to install rasterio on Cloud, check logs for a missing system library; as a last resort you can add a minimal **`packages.txt`** (**one package name per line, no `#` comment lines**).
 
 ## Memory
 
@@ -51,7 +51,7 @@ GeoTIFF uses **`rasterio`** (may need GDAL on some hosts). If install fails on C
 
 | Issue | Action |
 |--------|--------|
-| **Error installing requirements** | Almost always a heavy/compiled package. This repo uses a **slim** `requirements.txt` (no `rasterio`, no API stack). Pull latest `main` and **redeploy**. If it still fails, open **Manage app → Logs** and search for the first `ERROR` line from `pip`. |
+| **Error installing requirements** | Often a compiled wheel or resolver conflict. Pull latest `main` and **redeploy**. If it still fails, open **Manage app → Logs** and search for the first `ERROR` line from `pip` / `uv` (rasterio and torch are the usual heavy installs). |
 | `ModuleNotFoundError` | Redeploy after sync; for local full stack use `pip install -r requirements-full.txt`. |
 | OpenCV errors | Rare on Cloud with `opencv-python-headless`. If `cv2` still fails, add a minimal **`packages.txt`** (one package per line, no `#` lines) per Streamlit docs and redeploy. |
 | Model not found | Expected without weights; use TV or host checkpoints. |

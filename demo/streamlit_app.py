@@ -571,9 +571,9 @@ with col1:
                     import rasterio
                 except ImportError:
                     st.error(
-                        "**rasterio** is not installed on this host. For GeoTIFF, use "
-                        "`pip install -r requirements-full.txt` locally; Streamlit Cloud "
-                        "uses the slim `requirements.txt` (PNG upload workflow works)."
+                        "**rasterio** is not installed. Install with "
+                        "`pip install rasterio` or `pip install -r requirements.txt`, "
+                        "then restart the app."
                     )
                 else:
                     if len(gt_raw) > 500 * 1024 * 1024:

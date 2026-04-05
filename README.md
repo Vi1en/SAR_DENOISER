@@ -3,7 +3,7 @@
 **A Deep Learning Approach to Synthetic Aperture Radar Image Denoising**
 
 **Repository layout:** runnable scripts live in **`scripts/`**, tests in **`tests/`**, shared figures in **`assets/images/`** — see [`docs/REPO_LAYOUT.md`](docs/REPO_LAYOUT.md).  
-**Dependencies:** **`requirements.txt`** = slim Streamlit/CPU stack (no `--extra-index-url`, no ONNX/rasterio/API deps; PyYAML + torch ranges work on Python 3.11 and 3.13). **`requirements-full.txt`** = ONNX + GeoTIFF + FastAPI + queue (`requirements-dev.txt` includes it for CI/Docker).  
+**Dependencies:** **`requirements.txt`** = Streamlit/CPU stack including **rasterio** (GeoTIFF); no `--extra-index-url`, no ONNX/API/queue. PyYAML + torch ranges work on Python 3.11 and 3.13. **`requirements-full.txt`** = ONNX + FastAPI + Redis/RQ on top. **`requirements-dev.txt`** = full stack + linters/tests (CI/Docker).  
 **Streamlit Cloud:** choose **Python 3.11** under **Advanced settings** when deploying ([docs](https://docs.streamlit.io/deploy/streamlit-community-cloud/manage-your-app/upgrade-python)). Root **`runtime.txt`** is for other platforms; this repo does **not** ship **`packages.txt`** so Cloud skips `apt` (avoids broken mixed-Debian installs).
 
 ---
@@ -340,7 +340,7 @@ streamlit run demo/streamlit_app.py
 
 #### GeoTIFF (optional, production-style I/O)
 
-Single-band, **georeferenced** GeoTIFFs only (`rasterio` is in **`requirements-full.txt`**). The CLI reads the raster in **windows** (default tile 512×512), denoises each tile, and writes a float32 GeoTIFF with the **same CRS and geotransform** as the input. **`overlap` must be 0** in this version (non-overlapping tiles; overlap blending is future work). **Nodata** pixels are left unchanged where possible.
+Single-band, **georeferenced** GeoTIFFs only (`rasterio` is in **`requirements.txt`**). The CLI reads the raster in **windows** (default tile 512×512), denoises each tile, and writes a float32 GeoTIFF with the **same CRS and geotransform** as the input. **`overlap` must be 0** in this version (non-overlapping tiles; overlap blending is future work). **Nodata** pixels are left unchanged where possible.
 
 **Normalization:** each tile is min–max scaled to `[0, 1]` before the model and rescaled afterward. This does **not** infer amplitude vs dB; align with how you trained the network.
 
@@ -627,11 +627,11 @@ If `pip install -r requirements-full.txt` fails with **`Read timed out`** on `fi
 pip install -r requirements-full.txt --default-timeout=120
 ```
 
-If **rasterio** keeps failing over pip, install it from conda-forge once, then run `pip install -r requirements-full.txt` again so remaining pins resolve against what is already installed:
+If **rasterio** keeps failing over pip, install it from conda-forge once, then run `pip install -r requirements.txt` again so remaining pins resolve against what is already installed:
 
 ```bash
 conda install -c conda-forge rasterio
-pip install -r requirements-full.txt
+pip install -r requirements.txt
 ```
 
 #### 4. Verify Installation
@@ -923,7 +923,7 @@ FINAL_YEAR_PROJECT/
 │   └── build_improvements_presentation.py
 │
 ├── requirements.txt                  # Slim deps (Streamlit Cloud default)
-├── requirements-full.txt             # + rasterio, FastAPI, Redis/RQ (local/Docker/CI)
+├── requirements-full.txt             # + ONNX, FastAPI, Redis/RQ (local/Docker/CI)
 ├── CONTRIBUTING.md                    # PR checklist (tests, ruff, changelog)
 ├── PROJECT_REPORT.md                  # Detailed project report
 └── README.md                          # This file
