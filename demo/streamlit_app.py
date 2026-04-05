@@ -270,18 +270,18 @@ def safe_batch_png_name(original_name: str, index: int) -> str:
     return f"{index:04d}_{stem}.png"
 
 
-def normalize_images_shared_range(images: list[np.ndarray]) -> list[np.ndarray]:
-    """Map each image to [0, 1] using one global min/max across all (fair visual comparison)."""
-    if not images:
-        return []
-    arrs = [np.asarray(x, dtype=np.float32) for x in images]
-    stacked = np.stack(arrs, axis=0)
-    lo = float(np.min(stacked))
-    hi = float(np.max(stacked))
-    if hi <= lo + 1e-8:
-        return [np.clip(a, 0.0, 1.0) for a in arrs]
-    scale = hi - lo
-    return [np.clip((a - lo) / scale, 0.0, 1.0) for a in arrs]
+def normalize_multi_method_display(images: list[np.ndarray]) -> list[np.ndarray]:
+    """
+    Per-panel display stretch for TV / Direct / ADMM side-by-side.
+
+    A single global min–max across methods makes **Direct** look black when its
+    amplitude is much smaller than TV/ADMM (e.g. random weights with no checkpoint).
+    Percentile stretch per panel matches GeoTIFF preview behavior.
+    """
+    return [
+        contrast_stretch_percentile_float01(np.asarray(x, dtype=np.float32))
+        for x in images
+    ]
 
 
 # Order for multi-method run: TV → Direct → ADMM (matches typical classical → DL progression)
@@ -1440,7 +1440,7 @@ with col2:
                     out_m = svc.denoise_numpy(noisy_image, mname, **kw)
                     seconds_list.append(time.perf_counter() - t0)
                     raw_outputs.append(np.asarray(out_m["denoised"], dtype=np.float32))
-                display_arrays = normalize_images_shared_range(raw_outputs)
+                display_arrays = normalize_multi_method_display(raw_outputs)
                 st.session_state["multi_method_comparison"] = [
                     {"name": n, "display": d, "seconds": s}
                     for n, d, s in zip(MULTI_METHOD_ORDER, display_arrays, seconds_list)
@@ -1520,7 +1520,9 @@ if st.session_state.get("multi_method_comparison"):
     st.subheader("Multi-method comparison")
     st.caption(
         "One run with **TV**, **Direct**, and **ADMM-PnP-DL** using the same sidebar settings. "
-        "Intensity uses a **shared min–max** across all three outputs for a fair visual comparison."
+        "Each panel uses a **2–98% percentile stretch** so different output scales stay visible "
+        "(a **shared** min–max would often wash out **Direct** when its range is smaller than TV/ADMM, "
+        "e.g. no `checkpoints_simple` on Cloud). **Direct** still needs a real checkpoint for meaningful denoising."
     )
     mc = st.session_state["multi_method_comparison"]
     mcol1, mcol2, mcol3 = st.columns(3)
