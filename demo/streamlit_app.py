@@ -769,7 +769,8 @@ with col1:
                                     f"{safe_gt}_denoised.tif"
                                 )
                                 st.success(
-                                    "GeoTIFF ready — preview & metrics below; download when needed."
+                                    "GeoTIFF ready — preview and metric table beside thumbnails; "
+                                    "download when needed."
                                 )
                             except Exception as e:
                                 _clear_geotiff_viz_state()
@@ -796,35 +797,6 @@ with col1:
                 "real SAR; PSNR/SSIM here are **vs. the observed input** (not vs. clean)."
             )
             _gml = st.session_state.get("streamlit_geotiff_method_label", method)
-            gc1, gc2, gc3, gc4 = st.columns(4)
-            with gc1:
-                st.image(
-                    st.session_state["streamlit_geotiff_in_vis"],
-                    caption="Input (observed GeoTIFF)",
-                    use_container_width=True,
-                    clamp=True,
-                )
-            with gc2:
-                st.image(
-                    st.session_state["streamlit_geotiff_out_vis"],
-                    caption=f"Denoised ({_gml})",
-                    use_container_width=True,
-                    clamp=True,
-                )
-            with gc3:
-                st.image(
-                    st.session_state["streamlit_geotiff_diff_vis"],
-                    caption="|input − denoised| (joint norm., 99th pct. stretch)",
-                    use_container_width=True,
-                    clamp=True,
-                )
-            with gc4:
-                st.markdown("**Reflectivity ground truth**")
-                st.info(
-                    "Not bundled for real Sentinel-1 / uploaded GeoTIFFs. "
-                    "For **PSNR / SSIM vs clean**, use **SAMPLE** PNG patches (noisy + clean)."
-                )
-
             bq = st.session_state.get("streamlit_geotiff_blind_qa") or {}
             ein = st.session_state.get("streamlit_geotiff_enl_input")
             eout = st.session_state.get("streamlit_geotiff_enl_output")
@@ -839,69 +811,91 @@ with col1:
                     return "—"
                 return f"{fv:.3f}"
 
-            st.markdown("##### Metric summary")
-            _markdown_metric_table(
-                [
-                    ("ENL (input, global)", _fmt_enl(ein)),
-                    ("ENL (denoised, global)", _fmt_enl(eout)),
-                    (
-                        "ENL homog. (denoised)",
-                        _format_metric_float(
-                            float(bq.get("enl_homogeneous_median", 0.0))
+            _gtiff_metric_rows = [
+                ("ENL (input, global)", _fmt_enl(ein)),
+                ("ENL (denoised, global)", _fmt_enl(eout)),
+                (
+                    "ENL homog. (denoised)",
+                    _format_metric_float(float(bq.get("enl_homogeneous_median", 0.0))),
+                ),
+                (
+                    "Edge pres. vs input",
+                    _format_metric_float(
+                        float(bq.get("edge_preservation_vs_input", 0.0))
+                    ),
+                ),
+                (
+                    "Norm. RMSE (in vs out)",
+                    _format_metric_float(
+                        float(st.session_state.get("streamlit_geotiff_norm_rmse", 0.0))
+                    ),
+                ),
+                (
+                    "σ denoised (norm.)",
+                    _format_metric_float(float(bq.get("std", 0.0))),
+                ),
+                (
+                    "PSNR vs input (dB)",
+                    _format_metric_float(
+                        float(
+                            st.session_state.get("streamlit_geotiff_psnr_vs_input", 0.0)
                         ),
+                        nd=2,
                     ),
-                    (
-                        "Edge pres. vs input",
-                        _format_metric_float(
-                            float(bq.get("edge_preservation_vs_input", 0.0))
+                ),
+                (
+                    "SSIM vs input",
+                    _format_metric_float(
+                        float(
+                            st.session_state.get("streamlit_geotiff_ssim_vs_input", 0.0)
                         ),
+                        nd=4,
                     ),
-                    (
-                        "Norm. RMSE (in vs out)",
-                        _format_metric_float(
-                            float(
-                                st.session_state.get(
-                                    "streamlit_geotiff_norm_rmse", 0.0
-                                )
-                            )
-                        ),
-                    ),
-                    (
-                        "σ denoised (norm.)",
-                        _format_metric_float(float(bq.get("std", 0.0))),
-                    ),
-                    (
-                        "PSNR vs input (dB)",
-                        _format_metric_float(
-                            float(
-                                st.session_state.get(
-                                    "streamlit_geotiff_psnr_vs_input", 0.0
-                                )
-                            ),
-                            nd=2,
-                        ),
-                    ),
-                    (
-                        "SSIM vs input",
-                        _format_metric_float(
-                            float(
-                                st.session_state.get(
-                                    "streamlit_geotiff_ssim_vs_input", 0.0
-                                )
-                            ),
-                            nd=4,
-                        ),
-                    ),
-                    (
-                        "Var (denoised, norm.)",
-                        _format_metric_float(float(bq.get("variance", 0.0))),
-                    ),
-                ]
-            )
-            st.caption(
-                "**PSNR / SSIM** — vs joint-normalized **observed input** (higher PSNR → less change). "
-                "Not vs. clean reflectivity."
-            )
+                ),
+                (
+                    "Var (denoised, norm.)",
+                    _format_metric_float(float(bq.get("variance", 0.0))),
+                ),
+            ]
+
+            # Images left, metrics right — avoids a tall 4th column stretching the row
+            # and pushing the table far below the thumbnails.
+            geo_left, geo_right = st.columns([1.55, 1.0])
+            with geo_left:
+                gc1, gc2, gc3 = st.columns(3)
+                with gc1:
+                    st.image(
+                        st.session_state["streamlit_geotiff_in_vis"],
+                        caption="Input (observed GeoTIFF)",
+                        use_container_width=True,
+                        clamp=True,
+                    )
+                with gc2:
+                    st.image(
+                        st.session_state["streamlit_geotiff_out_vis"],
+                        caption=f"Denoised ({_gml})",
+                        use_container_width=True,
+                        clamp=True,
+                    )
+                with gc3:
+                    st.image(
+                        st.session_state["streamlit_geotiff_diff_vis"],
+                        caption="|input − denoised| (joint norm., 99th pct. stretch)",
+                        use_container_width=True,
+                        clamp=True,
+                    )
+            with geo_right:
+                st.markdown("##### Metric summary")
+                _markdown_metric_table(_gtiff_metric_rows)
+                st.caption(
+                    "PSNR / SSIM are vs joint-normalized **observed input** "
+                    "(higher PSNR → less change). Not vs. clean reflectivity."
+                )
+                st.markdown("**Reflectivity ground truth**")
+                st.caption(
+                    "Not bundled for real Sentinel-1 / uploads. "
+                    "For PSNR / SSIM vs clean, use **SAMPLE** PNG patches (noisy + clean)."
+                )
 
     # Load sample from SAMPLE dataset (user-selected patch, not random)
     sample_dir = "data/sample_sar/processed/test_patches"
