@@ -34,6 +34,10 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+SAMPLE_GEOTIFF_PATH = (
+    PROJECT_ROOT / "data" / "sample_geotiff" / "presentation_sample.tif"
+)
+
 
 def _ensure_pyyaml() -> None:
     """Ensure `import yaml` works (Cloud `uv` occasionally omits PyYAML from the env)."""
@@ -497,6 +501,45 @@ with col1:
             type=["tif", "tiff"],
             key="streamlit_geotiff_uploader",
         )
+        col_gt_a, col_gt_b = st.columns(2)
+        with col_gt_a:
+            if st.button(
+                "Load bundled presentation sample",
+                help=f"Uses `{SAMPLE_GEOTIFF_PATH.relative_to(PROJECT_ROOT)}` "
+                "(single-band GeoTIFF shipped with the repo for demos).",
+                key="streamlit_geotiff_load_sample",
+            ):
+                if not SAMPLE_GEOTIFF_PATH.is_file():
+                    st.error(
+                        "Bundled sample not found. From the repo root run: "
+                        "`python scripts/build_sample_geotiff.py` (requires **rasterio**)."
+                    )
+                else:
+                    st.session_state["streamlit_geotiff_sample_bytes"] = (
+                        SAMPLE_GEOTIFF_PATH.read_bytes()
+                    )
+                    st.session_state["streamlit_geotiff_sample_name"] = (
+                        SAMPLE_GEOTIFF_PATH.name
+                    )
+                    st.success(
+                        f"Loaded **{SAMPLE_GEOTIFF_PATH.name}** — set tile size if needed, "
+                        "then **Run GeoTIFF denoising**."
+                    )
+        with col_gt_b:
+            if st.session_state.get("streamlit_geotiff_sample_bytes") and st.button(
+                "Clear bundled sample",
+                key="streamlit_geotiff_clear_sample",
+            ):
+                st.session_state.pop("streamlit_geotiff_sample_bytes", None)
+                st.session_state.pop("streamlit_geotiff_sample_name", None)
+                st.rerun()
+
+        if st.session_state.get("streamlit_geotiff_sample_bytes") and not geotiff_file:
+            st.info(
+                f"Ready to run: **{st.session_state.get('streamlit_geotiff_sample_name', 'sample')}** "
+                "(uploading a file below will use the upload instead)."
+            )
+
         geotiff_tile = st.number_input(
             "Tile size (pixels)",
             min_value=64,
@@ -506,8 +549,23 @@ with col1:
             key="streamlit_geotiff_tile",
         )
         if st.button("Run GeoTIFF denoising", type="secondary", key="streamlit_geotiff_run"):
-            if geotiff_file is None:
-                st.error("Upload a GeoTIFF first.")
+            gt_raw = None
+            input_label = ""
+            if geotiff_file is not None:
+                gt_raw = geotiff_file.getvalue()
+                input_label = geotiff_file.name
+            elif st.session_state.get("streamlit_geotiff_sample_bytes"):
+                gt_raw = st.session_state["streamlit_geotiff_sample_bytes"]
+                input_label = str(
+                    st.session_state.get(
+                        "streamlit_geotiff_sample_name", "presentation_sample.tif"
+                    )
+                )
+
+            if gt_raw is None:
+                st.error(
+                    "Upload a GeoTIFF or click **Load bundled presentation sample** first."
+                )
             else:
                 try:
                     import rasterio
@@ -518,7 +576,6 @@ with col1:
                         "uses the slim `requirements.txt` (PNG upload workflow works)."
                     )
                 else:
-                    gt_raw = geotiff_file.getvalue()
                     if len(gt_raw) > 500 * 1024 * 1024:
                         st.error("File exceeds **500 MB** demo limit.")
                     else:
@@ -573,7 +630,7 @@ with col1:
                                     )
                                     gt_bytes = gt_out.read_bytes()
 
-                                stem = Path(geotiff_file.name).stem
+                                stem = Path(input_label).stem
                                 safe_gt = re.sub(r"[^a-zA-Z0-9._-]+", "_", stem).strip(
                                     "._-"
                                 )[:80] or "denoised"
