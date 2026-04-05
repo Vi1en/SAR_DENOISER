@@ -769,8 +769,8 @@ with col1:
                                     f"{safe_gt}_denoised.tif"
                                 )
                                 st.success(
-                                    "GeoTIFF ready — preview and metric table beside thumbnails; "
-                                    "download when needed."
+                                    "GeoTIFF ready — preview below; metric table sits directly under "
+                                    "the thumbnails. Download when needed."
                                 )
                             except Exception as e:
                                 _clear_geotiff_viz_state()
@@ -858,44 +858,41 @@ with col1:
                 ),
             ]
 
-            # Images left, metrics right — avoids a tall 4th column stretching the row
-            # and pushing the table far below the thumbnails.
-            geo_left, geo_right = st.columns([1.55, 1.0])
-            with geo_left:
-                gc1, gc2, gc3 = st.columns(3)
-                with gc1:
-                    st.image(
-                        st.session_state["streamlit_geotiff_in_vis"],
-                        caption="Input (observed GeoTIFF)",
-                        use_container_width=True,
-                        clamp=True,
-                    )
-                with gc2:
-                    st.image(
-                        st.session_state["streamlit_geotiff_out_vis"],
-                        caption=f"Denoised ({_gml})",
-                        use_container_width=True,
-                        clamp=True,
-                    )
-                with gc3:
-                    st.image(
-                        st.session_state["streamlit_geotiff_diff_vis"],
-                        caption="|input − denoised| (joint norm., 99th pct. stretch)",
-                        use_container_width=True,
-                        clamp=True,
-                    )
-            with geo_right:
-                st.markdown("##### Metric summary")
-                _markdown_metric_table(_gtiff_metric_rows)
-                st.caption(
-                    "PSNR / SSIM are vs joint-normalized **observed input** "
-                    "(higher PSNR → less change). Not vs. clean reflectivity."
+            # Thumbnails first; metric table full-width directly underneath (no side column).
+            gc1, gc2, gc3 = st.columns(3)
+            with gc1:
+                st.image(
+                    st.session_state["streamlit_geotiff_in_vis"],
+                    caption="Input (observed GeoTIFF)",
+                    use_container_width=True,
+                    clamp=True,
                 )
-                st.markdown("**Reflectivity ground truth**")
-                st.caption(
-                    "Not bundled for real Sentinel-1 / uploads. "
-                    "For PSNR / SSIM vs clean, use **SAMPLE** PNG patches (noisy + clean)."
+            with gc2:
+                st.image(
+                    st.session_state["streamlit_geotiff_out_vis"],
+                    caption=f"Denoised ({_gml})",
+                    use_container_width=True,
+                    clamp=True,
                 )
+            with gc3:
+                st.image(
+                    st.session_state["streamlit_geotiff_diff_vis"],
+                    caption="|input − denoised| (joint norm., 99th pct. stretch)",
+                    use_container_width=True,
+                    clamp=True,
+                )
+
+            st.markdown("##### Metric summary")
+            _markdown_metric_table(_gtiff_metric_rows)
+            st.caption(
+                "PSNR / SSIM are vs joint-normalized **observed input** "
+                "(higher PSNR → less change). Not vs. clean reflectivity."
+            )
+            st.markdown("**Reflectivity ground truth**")
+            st.caption(
+                "Not bundled for real Sentinel-1 / uploads. "
+                "For PSNR / SSIM vs clean, use **SAMPLE** PNG patches (noisy + clean)."
+            )
 
     # Load sample from SAMPLE dataset (user-selected patch, not random)
     sample_dir = "data/sample_sar/processed/test_patches"
